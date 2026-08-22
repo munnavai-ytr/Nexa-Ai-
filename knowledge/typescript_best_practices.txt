@@ -1,0 +1,5 @@
+TypeScript Coding Best Practices:
+1. Enable full strict mode configurations for type-safe compilation.
+2. Prioritize type interface definitions for clear, documented structural contracts.
+3. Keep layout utility helpers pure and free of side effects.
+4. Avoid any direct use of the 'any' type; prefer unknown or explicit unions.

@@ -1,0 +1,51 @@
+{
+  "typescript_best_practices.txt": {
+    "id": "lib-1",
+    "filename": "typescript_best_practices.txt",
+    "category": "TypeScript",
+    "dateAdded": "8/19/2026",
+    "usageCount": 14
+  },
+  "tailwind_styling.txt": {
+    "id": "lib-2",
+    "filename": "tailwind_styling.txt",
+    "category": "Tailwind",
+    "dateAdded": "8/19/2026",
+    "usageCount": 8
+  },
+  "react_and_nextjs_guide.md": {
+    "id": "lib-3",
+    "filename": "react_and_nextjs_guide.md",
+    "category": "React & NextJS",
+    "dateAdded": "8/19/2026",
+    "usageCount": 24
+  },
+  "python_debugging_and_errors.md": {
+    "id": "lib-4",
+    "filename": "python_debugging_and_errors.md",
+    "category": "Python Debugging",
+    "dateAdded": "8/19/2026",
+    "usageCount": 11
+  },
+  "javascript_and_api_handling.md": {
+    "id": "lib-5",
+    "filename": "javascript_and_api_handling.md",
+    "category": "JavaScript & APIs",
+    "dateAdded": "8/19/2026",
+    "usageCount": 19
+  },
+  "database_and_supabase.md": {
+    "id": "lib-6",
+    "filename": "database_and_supabase.md",
+    "category": "Databases",
+    "dateAdded": "8/19/2026",
+    "usageCount": 16
+  },
+  "02_Ultimate_Python_and_AI_Data_Science_Guide.md": {
+    "id": "lib-7",
+    "filename": "02_Ultimate_Python_and_AI_Data_Science_Guide.md",
+    "category": "Python & AI Data Science",
+    "dateAdded": "8/19/2026",
+    "usageCount": 35
+  }
+}
