@@ -1,33 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
-
-let supabaseClient: any = null;
-
-function getSupabase() {
-  if (supabaseClient) return supabaseClient;
-  const supabaseUrl = process.env.SUPABASE_URL?.trim();
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!supabaseUrl || !supabaseKey) {
-    return null;
-  }
-  if (
-    supabaseUrl.includes("your-supabase") ||
-    supabaseUrl.includes("placeholder") ||
-    supabaseUrl.includes("example.com") ||
-    !supabaseUrl.startsWith("http")
-  ) {
-    return null;
-  }
-
-  try {
-    supabaseClient = createClient(supabaseUrl, supabaseKey, {
-      auth: { persistSession: false, autoRefreshToken: false }
-    });
-    return supabaseClient;
-  } catch {
-    return null;
-  }
-}
+import { getSupabase } from "@/lib/supabase";
 
 export async function PATCH(
   req: NextRequest,
@@ -38,7 +10,7 @@ export async function PATCH(
     const body = await req.json();
     const { name } = body;
 
-    if (!name) {
+    if (!name || typeof name !== "string") {
       return NextResponse.json({ success: false, error: "name is required" }, { status: 400 });
     }
 
@@ -50,7 +22,7 @@ export async function PATCH(
     try {
       await supabase
         .from("agent_projects")
-        .update({ name, updated_at: new Date().toISOString() })
+        .update({ name: name.trim(), updated_at: new Date().toISOString() })
         .eq("id", projectId);
     } catch {
       // Ignore database write failures, fallback handles it
@@ -74,6 +46,14 @@ export async function DELETE(
     }
 
     try {
+      // Delete child records first if foreign keys aren't cascaded
+      try {
+        await supabase.from("agent_files").delete().eq("project_id", projectId);
+      } catch {}
+      try {
+        await supabase.from("agent_messages").delete().eq("project_id", projectId);
+      } catch {}
+
       await supabase
         .from("agent_projects")
         .delete()

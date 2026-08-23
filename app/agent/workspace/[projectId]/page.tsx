@@ -126,6 +126,10 @@ export default function WorkspacePage() {
           setUsingSupabase(true);
           isSupabaseActive = true;
 
+          if (data.project.messages && Array.isArray(data.project.messages) && data.project.messages.length > 0) {
+            setMessages(data.project.messages);
+          }
+
           if (data.files && data.files.length > 0) {
             const parsedFiles: { [path: string]: string } = {};
             data.files.forEach((f: any) => {
@@ -149,6 +153,16 @@ export default function WorkspacePage() {
             const list = JSON.parse(localProjects);
             const found = list.find((p: any) => p.id === projectId);
             if (found) setProjectName(found.name);
+          }
+
+          const localMessages = localStorage.getItem(`nexa_messages_${projectId}`);
+          if (localMessages) {
+            try {
+              const parsedMsgs = JSON.parse(localMessages);
+              if (Array.isArray(parsedMsgs) && parsedMsgs.length > 0) {
+                setMessages(parsedMsgs);
+              }
+            } catch {}
           }
 
           const localFiles = localStorage.getItem(`nexa_files_${projectId}`);
@@ -320,6 +334,7 @@ export default function WorkspacePage() {
     ];
     setMessages(updatedMessages);
     setChatInput("");
+    saveProjectState(files, updatedMessages);
 
     try {
       const apiKey = localStorage.getItem("user_gemini_api_key") || "";
@@ -342,15 +357,16 @@ export default function WorkspacePage() {
       if (!res.ok) throw new Error(data.error || "Failed to communicate with Nexa Engine");
 
       if (data.success) {
-        setMessages(prev => [
-          ...prev,
-          { role: "assistant", content: data.explanation }
-        ]);
+        const finalMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+          ...updatedMessages,
+          { role: "assistant" as const, content: data.explanation }
+        ];
+        setMessages(finalMessages);
 
+        let latestFiles = { ...files };
         if (data.files && data.files.length > 0) {
-          const updatedFiles = { ...files };
           data.files.forEach((file: any) => {
-            updatedFiles[file.file] = file.code;
+            latestFiles[file.file] = file.code;
             addLog(`VFS File modified successfully: ${file.file}`, "success");
             
             // Add tab to tab list if not open
@@ -359,25 +375,28 @@ export default function WorkspacePage() {
               return [...prev, file.file];
             });
           });
-          setFiles(updatedFiles);
-
-          // Save state to remote/local storage
-          saveProjectState(updatedFiles);
+          setFiles(latestFiles);
         }
+
+        // Save updated files and messages to Supabase / LocalStorage
+        saveProjectState(latestFiles, finalMessages);
       }
     } catch (err: any) {
       addLog(`Nexa Engine Error: ${err.message}`, "error");
-      setMessages(prev => [
-        ...prev,
-        { role: "assistant", content: `An error occurred: ${err.message}` }
-      ]);
+      const errorMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+        ...updatedMessages,
+        { role: "assistant" as const, content: `An error occurred: ${err.message}` }
+      ];
+      setMessages(errorMessages);
+      saveProjectState(files, errorMessages);
     } finally {
       setAgentRunning(false);
     }
   };
 
-  const saveProjectState = async (latestFiles: { [path: string]: string }) => {
+  const saveProjectState = async (latestFiles: { [path: string]: string }, latestMessages?: Array<{ role: "user" | "assistant"; content: string }>) => {
     setIsSaving(true);
+    const msgsToSave = latestMessages || messages;
     if (usingSupabase) {
       try {
         await fetch("/api/agent/projects", {
@@ -389,7 +408,8 @@ export default function WorkspacePage() {
             files: Object.entries(latestFiles).map(([path, content]) => ({
               file_path: path,
               content
-            }))
+            })),
+            messages: msgsToSave
           })
         });
       } catch (err) {
@@ -397,6 +417,7 @@ export default function WorkspacePage() {
       }
     } else {
       localStorage.setItem(`nexa_files_${projectId}`, JSON.stringify(latestFiles));
+      localStorage.setItem(`nexa_messages_${projectId}`, JSON.stringify(msgsToSave));
     }
     setTimeout(() => {
       setIsSaving(false);

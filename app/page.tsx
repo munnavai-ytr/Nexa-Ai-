@@ -33,7 +33,8 @@ import {
   FolderOpen,
   Settings,
   Download,
-  Code2
+  Code2,
+  Pencil
 } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "motion/react";
@@ -96,6 +97,8 @@ export default function Home() {
   // Chat States
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [editingChatId, setEditingChatId] = useState<string | null>(null);
+  const [editingChatTitle, setEditingChatTitle] = useState("");
   const [inputValue, setInputValue] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
@@ -245,12 +248,55 @@ export default function Home() {
     }
   };
 
+  // Save chat to Supabase background helper
+  const saveChatToSupabase = async (chatSession: ChatSession) => {
+    try {
+      await fetch("/api/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: chatSession.id,
+          title: chatSession.title,
+          messages: chatSession.messages
+        })
+      });
+    } catch (err) {
+      console.warn("Notice: Failed to sync chat session to Supabase, local cache retained", err);
+    }
+  };
+
+  // Fetch Chat Sessions from Supabase
+  const fetchSupabaseChats = async () => {
+    try {
+      const res = await fetch("/api/chat/sessions");
+      const data = await res.json();
+      if (data.success && !data.useLocalFallback && data.sessions && data.sessions.length > 0) {
+        const formatted: ChatSession[] = data.sessions.map((s: any) => ({
+          id: s.id,
+          title: s.title,
+          created: s.created_at ? new Date(s.created_at).toLocaleDateString() : getFormattedDate(),
+          messages: s.messages || []
+        }));
+        setChats(formatted);
+        const savedActiveChatId = localStorage.getItem("ai_platform_active_chat_id");
+        if (savedActiveChatId && formatted.some(c => c.id === savedActiveChatId)) {
+          setActiveChatId(savedActiveChatId);
+        } else if (formatted.length > 0) {
+          setActiveChatId(formatted[0].id);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch remote chats, keeping local cache", err);
+    }
+  };
+
   // Hydration & Initial State Load
   useEffect(() => {
     // Defer setting initial states and mounted flag to prevent React 19 synchronous effect render warning
     const rId = requestAnimationFrame(() => {
-      // Fetch keys from Supabase
+      // Fetch keys, chats, and library from Supabase
       fetchSupabaseKeys();
+      fetchSupabaseChats();
       fetchLibraryItems();
 
       // Load user Gemini API key for BYOK & selected model
@@ -411,6 +457,28 @@ What are we coding today?`,
     setActiveChatId(newId);
     setActiveTab("chat");
     setSidebarOpen(false);
+    saveChatToSupabase(newChat);
+  };
+
+  // Handle Rename Chat
+  const handleRenameChat = async (chatId: string, newTitle: string) => {
+    if (!newTitle.trim()) {
+      setEditingChatId(null);
+      return;
+    }
+    const trimmed = newTitle.trim();
+    const updated = chats.map(c => c.id === chatId ? { ...c, title: trimmed } : c);
+    setChats(updated);
+    setEditingChatId(null);
+    try {
+      await fetch(`/api/chat/sessions/${chatId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: trimmed })
+      });
+    } catch (err) {
+      console.error("Supabase rename chat error:", err);
+    }
   };
 
   // Handle Export Chat
@@ -444,7 +512,7 @@ What are we coding today?`,
   };
 
   // Handle Delete Chat
-  const handleDeleteChat = (chatId: string, e: React.MouseEvent) => {
+  const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const updated = chats.filter(c => c.id !== chatId);
     setChats(updated);
@@ -454,6 +522,13 @@ What are we coding today?`,
       } else {
         setActiveChatId(null);
       }
+    }
+    try {
+      await fetch(`/api/chat/sessions/${chatId}`, {
+        method: "DELETE"
+      });
+    } catch (err) {
+      console.error("Supabase delete chat error:", err);
     }
   };
 
@@ -517,16 +592,20 @@ What are we coding today?`,
     const updatedMessages = [...targetChat.messages, userMsg];
 
     // Optimistic UI updates
+    const userUpdatedChat: ChatSession = {
+      ...targetChat,
+      title: newTitle,
+      messages: updatedMessages
+    };
+
     setChats(prev => prev.map(c => {
       if (c.id === currentChatId) {
-        return {
-          ...c,
-          title: newTitle,
-          messages: updatedMessages
-        };
+        return userUpdatedChat;
       }
       return c;
     }));
+
+    saveChatToSupabase(userUpdatedChat);
 
     setInputValue("");
     setIsSending(true);
@@ -573,15 +652,20 @@ What are we coding today?`,
         sourceType: data.sourceType
       };
 
+      const finalSuccessChat: ChatSession = {
+        ...targetChat,
+        title: newTitle,
+        messages: [...updatedMessages, assistantMsg]
+      };
+
       setChats(prev => prev.map(c => {
         if (c.id === currentChatId) {
-          return {
-            ...c,
-            messages: [...updatedMessages, assistantMsg]
-          };
+          return finalSuccessChat;
         }
         return c;
       }));
+
+      saveChatToSupabase(finalSuccessChat);
     } catch (err: any) {
       console.error(err);
       const errMessage = err.message || "An unexpected error occurred.";
@@ -602,15 +686,21 @@ What are we coding today?`,
         content: formattedErrorContent,
         timestamp: getFormattedTime()
       };
+
+      const finalErrorChat: ChatSession = {
+        ...targetChat,
+        title: newTitle,
+        messages: [...updatedMessages, errorSystemMsg]
+      };
+
       setChats(prev => prev.map(c => {
         if (c.id === currentChatId) {
-          return {
-            ...c,
-            messages: [...updatedMessages, errorSystemMsg]
-          };
+          return finalErrorChat;
         }
         return c;
       }));
+
+      saveChatToSupabase(finalErrorChat);
     } finally {
       setIsSending(false);
     }
@@ -964,20 +1054,69 @@ What are we coding today?`,
                       : "text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200/40 dark:hover:bg-neutral-800/40"
                   }`}
                 >
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    <MessageSquare className={`h-4 w-4 shrink-0 ${isActive ? "text-amber-800 dark:text-amber-400" : "text-neutral-400"}`} />
-                    <span className="truncate text-xs leading-relaxed">{c.title}</span>
-                  </div>
-                  
-                  {/* Hover Delete Button */}
-                  <button
-                    id={`delete-chat-btn-${c.id}`}
-                    onClick={(e) => handleDeleteChat(c.id, e)}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/10 rounded text-neutral-400 hover:text-red-500 transition-all"
-                    title="Delete Chat"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {editingChatId === c.id ? (
+                    <div className="flex items-center gap-1.5 w-full" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        id={`edit-chat-title-input-${c.id}`}
+                        type="text"
+                        value={editingChatTitle}
+                        onChange={(e) => setEditingChatTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleRenameChat(c.id, editingChatTitle);
+                          if (e.key === "Escape") setEditingChatId(null);
+                        }}
+                        autoFocus
+                        className="flex-1 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-xs text-neutral-900 dark:text-neutral-100 focus:outline-hidden focus:ring-1 focus:ring-amber-800"
+                      />
+                      <button
+                        id={`save-chat-title-btn-${c.id}`}
+                        onClick={() => handleRenameChat(c.id, editingChatTitle)}
+                        className="p-1 hover:bg-green-500/10 rounded text-green-600 dark:text-green-400"
+                        title="Save title"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        id={`cancel-chat-title-btn-${c.id}`}
+                        onClick={() => setEditingChatId(null)}
+                        className="p-1 hover:bg-neutral-500/10 rounded text-neutral-400"
+                        title="Cancel"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <MessageSquare className={`h-4 w-4 shrink-0 ${isActive ? "text-amber-800 dark:text-amber-400" : "text-neutral-400"}`} />
+                        <span className="truncate text-xs leading-relaxed">{c.title}</span>
+                      </div>
+                      
+                      {/* Action Buttons: Rename & Delete */}
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          id={`rename-chat-btn-${c.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingChatId(c.id);
+                            setEditingChatTitle(c.title);
+                          }}
+                          className="p-1 hover:bg-neutral-500/10 rounded text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-all"
+                          title="Rename Chat"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          id={`delete-chat-btn-${c.id}`}
+                          onClick={(e) => handleDeleteChat(c.id, e)}
+                          className="p-1 hover:bg-red-500/10 rounded text-neutral-400 hover:text-red-500 transition-all"
+                          title="Delete Chat"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               );
             })

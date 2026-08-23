@@ -102,11 +102,18 @@ export default function AgentDashboard() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            projectId: targetProjectId,
             name: prompt.trim().substring(0, 30) || "Untitled Application",
             files: Object.entries(initialFiles).map(([path, content]) => ({
               file_path: path,
               content
-            }))
+            })),
+            messages: [
+              {
+                role: "assistant",
+                content: "Welcome to Play Nexa Workspace. I am Nexa-AI. Initializing project workspace..."
+              }
+            ]
           })
         });
         const resData = await res.json();
@@ -116,18 +123,18 @@ export default function AgentDashboard() {
       } catch (err) {
         console.error("Failed to save project to Supabase", err);
       }
-    } else {
-      // LocalStorage Sync
-      const newProject: Project = {
-        id: targetProjectId,
-        name: prompt.trim().substring(0, 30) || "Untitled Application",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      const updated = [newProject, ...projects];
-      localStorage.setItem("nexa_agent_projects", JSON.stringify(updated));
-      localStorage.setItem(`nexa_files_${targetProjectId}`, JSON.stringify(initialFiles));
     }
+
+    // LocalStorage Sync backup
+    const newProject: Project = {
+      id: targetProjectId,
+      name: prompt.trim().substring(0, 30) || "Untitled Application",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    const updated = [newProject, ...projects.filter(p => p.id !== targetProjectId)];
+    localStorage.setItem("nexa_agent_projects", JSON.stringify(updated));
+    localStorage.setItem(`nexa_files_${targetProjectId}`, JSON.stringify(initialFiles));
 
     // Save initial prompt to sessionStorage to pass to workspace
     sessionStorage.setItem(`nexa_initial_prompt_${targetProjectId}`, prompt.trim());

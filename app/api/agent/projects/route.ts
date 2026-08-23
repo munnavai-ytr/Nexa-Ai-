@@ -1,48 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
-
-let supabaseClient: any = null;
-
-function getSupabase() {
-  if (supabaseClient) return supabaseClient;
-  const supabaseUrl = process.env.SUPABASE_URL?.trim();
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!supabaseUrl || !supabaseKey) {
-    return null;
-  }
-  if (
-    supabaseUrl.includes("your-supabase") ||
-    supabaseUrl.includes("placeholder") ||
-    supabaseUrl.includes("example.com") ||
-    !supabaseUrl.startsWith("http")
-  ) {
-    return null;
-  }
-
-  try {
-    supabaseClient = createClient(supabaseUrl, supabaseKey, {
-      auth: { persistSession: false, autoRefreshToken: false }
-    });
-    return supabaseClient;
-  } catch {
-    return null;
-  }
-}
-
-const SQL_INIT_SCHEMA = `CREATE TABLE IF NOT EXISTS agent_projects (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  secrets JSONB DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS agent_files (
-  project_id TEXT REFERENCES agent_projects(id) ON DELETE CASCADE,
-  file_path TEXT NOT NULL,
-  content TEXT NOT NULL,
-  PRIMARY KEY (project_id, file_path)
-);`;
+import { getSupabase, SUPABASE_SQL_SCHEMA } from "@/lib/supabase";
 
 export async function GET(req: NextRequest) {
   try {
@@ -55,7 +12,7 @@ export async function GET(req: NextRequest) {
     const projectId = searchParams.get("projectId");
 
     if (projectId) {
-      // Get single project files and secrets
+      // Get single project files, secrets, and chat logs
       try {
         const { data: project, error: pError } = await supabase
           .from("agent_projects")
@@ -72,14 +29,33 @@ export async function GET(req: NextRequest) {
           .select("*")
           .eq("project_id", projectId);
 
-        if (fError) {
-          return NextResponse.json({ success: true, useLocalFallback: true, project, files: [] });
+        // Fetch messages if separate table exists or use JSONB
+        let messages = project.messages || [];
+        try {
+          const { data: msgRows, error: msgErr } = await supabase
+            .from("agent_messages")
+            .select("*")
+            .eq("project_id", projectId)
+            .order("created_at", { ascending: true });
+
+          if (!msgErr && msgRows && msgRows.length > 0) {
+            messages = msgRows.map((m: any) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+            }));
+          }
+        } catch {
+          // fallback to project.messages JSONB
         }
 
         return NextResponse.json({
           success: true,
-          project,
-          files: files || []
+          project: {
+            ...project,
+            messages,
+          },
+          files: files || [],
         });
       } catch {
         return NextResponse.json({ success: true, useLocalFallback: true, project: null, files: [] });
@@ -98,7 +74,7 @@ export async function GET(req: NextRequest) {
           success: true,
           useLocalFallback: true,
           projects: [],
-          sql: SQL_INIT_SCHEMA
+          sql: SUPABASE_SQL_SCHEMA,
         });
       }
 
@@ -108,7 +84,7 @@ export async function GET(req: NextRequest) {
         success: true,
         useLocalFallback: true,
         projects: [],
-        sql: SQL_INIT_SCHEMA
+        sql: SUPABASE_SQL_SCHEMA,
       });
     }
   } catch (err: any) {
@@ -116,7 +92,7 @@ export async function GET(req: NextRequest) {
       success: true,
       useLocalFallback: true,
       projects: [],
-      error: err?.message || "Fallback to local storage"
+      error: err?.message || "Fallback to local storage",
     });
   }
 }
@@ -125,9 +101,8 @@ export async function POST(req: NextRequest) {
   try {
     const supabase = getSupabase();
     const body = await req.json();
-    const { projectId: customProjectId, name, secrets, files } = body;
+    const { projectId: customProjectId, name, secrets, files, messages, user_id = "default_user" } = body;
 
-    // Generate a secure project id
     const projectId = customProjectId || "proj-" + Math.random().toString(36).substring(2, 9);
 
     if (!supabase) {
@@ -135,33 +110,72 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const { error } = await supabase
-        .from("agent_projects")
-        .upsert({
-          id: projectId,
-          name: name || "Untitled Project",
-          secrets: secrets || {},
-          updated_at: new Date().toISOString()
-        });
+      const now = new Date().toISOString();
+      const updateData: any = {
+        id: projectId,
+        user_id,
+        name: name || "Untitled Project",
+        updated_at: now,
+      };
 
-      if (error) {
-        return NextResponse.json({ success: true, useLocalFallback: true, projectId });
+      if (secrets !== undefined) {
+        updateData.secrets = secrets;
+      }
+      if (messages !== undefined && Array.isArray(messages)) {
+        updateData.messages = messages;
       }
 
+      const { error } = await supabase
+        .from("agent_projects")
+        .upsert(updateData);
+
+      if (error) {
+        console.warn("Supabase upsert agent_projects error:", error.message);
+        return NextResponse.json({ success: true, useLocalFallback: true, projectId, error: error.message });
+      }
+
+      // Upsert files
       if (files && Array.isArray(files)) {
         for (const file of files) {
-          await supabase
-            .from("agent_files")
-            .upsert({
-              project_id: projectId,
-              file_path: file.file_path,
-              content: file.content
-            });
+          if (file && file.file_path) {
+            await supabase
+              .from("agent_files")
+              .upsert({
+                project_id: projectId,
+                file_path: file.file_path,
+                content: file.content || "",
+                updated_at: now,
+              });
+          }
+        }
+      }
+
+      // Upsert messages if provided
+      if (messages && Array.isArray(messages)) {
+        try {
+          for (let i = 0; i < messages.length; i++) {
+            const m = messages[i];
+            if (m && m.content) {
+              const msgId = m.id || `${projectId}-msg-${i}`;
+              await supabase
+                .from("agent_messages")
+                .upsert({
+                  id: msgId,
+                  project_id: projectId,
+                  role: m.role || "user",
+                  content: m.content,
+                  created_at: now,
+                });
+            }
+          }
+        } catch (msgErr) {
+          console.warn("Notice: agent_messages table sync skipped", msgErr);
         }
       }
 
       return NextResponse.json({ success: true, projectId });
-    } catch {
+    } catch (dbErr: any) {
+      console.warn("Supabase project remote save error:", dbErr?.message);
       return NextResponse.json({ success: true, useLocalFallback: true, projectId });
     }
   } catch (err: any) {
