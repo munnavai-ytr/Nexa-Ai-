@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { Pinecone } from "@pinecone-database/pinecone";
 import { NextRequest, NextResponse } from "next/server";
 import { getKnowledgeItems } from "@/lib/knowledgeStore";
@@ -31,7 +31,7 @@ function parseGeminiError(err: any): { message: string; status: number } {
     };
   }
 
-  if (status === 429 || errStr.includes("429") || errStr.toLowerCase().includes("quota") || errStr.toLowerCase().includes("too many requests") || errStr.toLowerCase().includes("rate limit")) {
+  if (status === 429 || errStr.includes("429") || errStr.toLowerCase().includes("quota") || errStr.toLowerCase().includes("too many requests") || errStr.toLowerCase().includes("rate limit") || errStr.toLowerCase().includes("resource_exhausted") || errStr.toLowerCase().includes("exhausted")) {
     return {
       message: "⏳ Rate limit or quota exhausted (429 Too Many Requests). Please verify your personal Gemini API Key in BYOK Settings or wait a moment.",
       status: 429
@@ -234,8 +234,11 @@ export async function POST(req: NextRequest) {
     const modelsToTry = [
       mappedModel,
       "gemini-3.7-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-1.5-flash",
+      "gemini-1.5-flash-8b",
       "gemini-3.1-pro-preview",
-      "gemini-3.1-flash-lite"
+      "gemini-1.5-pro"
     ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
     let systemInstruction = `You are Play Nexa AI, a friendly, versatile, and highly intelligent AI coding mentor and software architect.
@@ -258,7 +261,7 @@ CORE CONVERSATIONAL GUIDELINES:
 
     for (const modelName of modelsToTry) {
       let attempts = 0;
-      const maxAttempts = 1; // Reduce attempts for speed
+      const maxAttempts = 2; // Increased retry attempts for 429/503
       
       while (attempts < maxAttempts) {
         try {
@@ -268,6 +271,12 @@ CORE CONVERSATIONAL GUIDELINES:
             config: {
               systemInstruction,
               temperature: 0.7,
+              safetySettings: [
+                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+              ]
             },
           });
           if (response) break;
@@ -277,7 +286,8 @@ CORE CONVERSATIONAL GUIDELINES:
           attempts++;
           
           if ((parsed.status === 503 || parsed.status === 429) && attempts < maxAttempts) {
-            await new Promise(res => setTimeout(res, 1000 * attempts));
+            console.warn(`[AI Chat] Model ${modelName} hit ${parsed.status}. Retrying (Attempt ${attempts}/${maxAttempts})...`);
+            await new Promise(res => setTimeout(res, 2000 * attempts)); // Increased backoff
             continue;
           }
           break;

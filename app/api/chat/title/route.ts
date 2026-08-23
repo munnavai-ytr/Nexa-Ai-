@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
@@ -38,15 +38,32 @@ export async function POST(req: NextRequest) {
       }
     });
 
-    try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-lite",
-        contents: `Generate a concise, engaging, 3-to-5-word summary title for this user message. DO NOT use quotation marks, punctuation, or conversational intros. Return ONLY the title text:\n\n"${message.substring(0, 300)}"`,
-        config: {
-          temperature: 0.3,
-        }
-      });
+    const modelsToTry = ["gemini-3.1-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
+    let response;
+    let lastErr;
 
+    for (const modelName of modelsToTry) {
+      try {
+        response = await ai.models.generateContent({
+          model: modelName,
+          contents: `Generate a concise, engaging, 3-to-5-word summary title for this user message. DO NOT use quotation marks, punctuation, or conversational intros. Return ONLY the title text:\n\n"${message.substring(0, 300)}"`,
+          config: {
+            temperature: 0.3,
+            safetySettings: [
+              { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+              { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+              { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+              { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+            ]
+          }
+        });
+        if (response) break;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+
+    try {
       let rawTitle = response?.text?.trim() || "";
       rawTitle = rawTitle.replace(/^["']|["']$/g, "").replace(/^Title:\s*/i, "").trim();
       if (!rawTitle || rawTitle.length > 50) {

@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 import { getKnowledgeItems } from "@/lib/knowledgeStore";
 
@@ -75,8 +75,11 @@ export async function POST(req: NextRequest) {
     const modelsToTry = [
       mappedModel,
       "gemini-3.7-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-1.5-flash",
+      "gemini-1.5-flash-8b",
       "gemini-3.1-pro-preview",
-      "gemini-3.1-flash-lite"
+      "gemini-1.5-pro"
     ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
     if (!messages || !Array.isArray(messages)) {
@@ -192,17 +195,40 @@ Project ID: ${projectId || "None"}`;
     let lastError: any = null;
 
     for (const modelToCall of modelsToTry) {
-      try {
-        response = await ai.models.generateContent({
-          model: modelToCall,
-          contents,
-          config
-        });
-        if (response) break;
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`Model ${modelToCall} failed, trying next fallback:`, err.message);
+      let attempts = 0;
+      const maxAttempts = 2;
+
+      while (attempts < maxAttempts) {
+        try {
+          response = await ai.models.generateContent({
+            model: modelToCall,
+            contents,
+            config: {
+              ...config,
+              safetySettings: [
+                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+              ]
+            }
+          });
+          if (response) break;
+        } catch (err: any) {
+          lastError = err;
+          attempts++;
+          const parsed = parseAgentGeminiError(err);
+
+          if ((parsed.status === 503 || parsed.status === 429) && attempts < maxAttempts) {
+            console.warn(`[Agent] Model ${modelToCall} hit ${parsed.status}. Retrying (Attempt ${attempts}/${maxAttempts})...`);
+            await new Promise(res => setTimeout(res, 2000 * attempts));
+            continue;
+          }
+          console.warn(`Model ${modelToCall} failed, trying next fallback:`, err.message);
+          break;
+        }
       }
+      if (response) break;
     }
 
     if (!response) {
