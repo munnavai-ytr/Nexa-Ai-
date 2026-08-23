@@ -2660,8 +2660,8 @@ What are we coding today?`,
                   >
                     <option value="gemini-2.0-flash">gemini-2.0-flash</option>
                     <option value="gemini-2.0-flash-lite-preview-02-05">gemini-2.0-flash-lite</option>
-                    <option value="gemini-1.5-pro">gemini-1.5-pro</option>
-                    <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                    <option value="gemini-1.5-pro-latest">gemini-1.5-pro</option>
+                    <option value="gemini-1.5-flash-latest">gemini-1.5-flash</option>
                   </select>
                 </div>
 

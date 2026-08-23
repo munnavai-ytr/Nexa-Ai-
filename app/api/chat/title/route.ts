@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
       }
     });
 
-    const modelsToTry = ["gemini-3.1-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b", STABLE_FALLBACK_MODEL];
+    const modelsToTry = ["gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.5-flash-8b", STABLE_FALLBACK_MODEL];
     let response;
     let lastErr;
 

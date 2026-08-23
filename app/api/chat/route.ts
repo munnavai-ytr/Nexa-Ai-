@@ -34,7 +34,7 @@ function parseGeminiError(err: any): { message: string; status: number } {
 
   if (status === 429 || errStr.includes("429") || errStr.toLowerCase().includes("quota") || errStr.toLowerCase().includes("too many requests") || errStr.toLowerCase().includes("rate limit") || errStr.toLowerCase().includes("resource_exhausted") || errStr.toLowerCase().includes("exhausted")) {
     return {
-      message: "⏳ Rate limit or quota exhausted (429 Too Many Requests). Please verify your personal Gemini API Key in BYOK Settings or wait a moment.",
+      message: "⏳ API Quota Exhausted (429). This usually means your personal Gemini API key has reached its free tier limit or a specific model limit. Nexa AI is attempting to switch to a fallback model if available.",
       status: 429
     };
   }
@@ -227,10 +227,11 @@ export async function POST(req: NextRequest) {
     const modelsToTry = [
       sanitizedModel,
       "gemini-2.0-flash",
+      "gemini-1.5-flash-latest",
       "gemini-1.5-flash",
       "gemini-1.5-flash-8b",
       "gemini-2.0-flash-lite-preview-02-05",
-      "gemini-1.5-pro",
+      "gemini-1.5-pro-latest",
       STABLE_FALLBACK_MODEL
     ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
