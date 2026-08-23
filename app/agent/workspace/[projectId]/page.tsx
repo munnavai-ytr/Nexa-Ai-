@@ -526,13 +526,26 @@ export default function WorkspacePage() {
       <header className="h-14 border-b border-neutral-800 bg-[#0B0D13] px-4 flex items-center justify-between shrink-0">
         <div className="flex items-center space-x-3 min-w-0">
           <button 
+            id="workspace-back-projects-btn"
             onClick={() => router.push("/agent")}
             className="p-1.5 hover:bg-neutral-800 rounded-lg text-neutral-400 hover:text-neutral-200 transition-colors cursor-pointer"
+            title="Back to Projects"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
-          <span className="text-xs text-neutral-500 font-mono select-none">Play Nexa AI</span>
-          <span className="text-neutral-600 font-mono select-none">/</span>
+
+          <button
+            id="workspace-ask-chat-btn"
+            onClick={() => router.push("/")}
+            className="flex items-center space-x-1.5 bg-neutral-900 hover:bg-neutral-800 text-xs text-neutral-300 hover:text-white font-mono border border-neutral-800 hover:border-neutral-700 px-3 py-1.5 rounded-lg transition-all cursor-pointer shadow-xs"
+            title="Return to Main Chat"
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-amber-500" />
+            <span className="font-medium text-xs">Ask</span>
+          </button>
+
+          <span className="text-xs text-neutral-500 font-mono select-none hidden sm:inline">Play Nexa AI</span>
+          <span className="text-neutral-600 font-mono select-none hidden sm:inline">/</span>
           <h2 className="text-xs font-semibold text-neutral-200 truncate font-mono max-w-[150px] sm:max-w-[200px]">
             {projectName}
           </h2>

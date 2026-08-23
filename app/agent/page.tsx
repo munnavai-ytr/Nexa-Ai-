@@ -13,7 +13,8 @@ import {
   MoreVertical,
   Layers,
   Database,
-  ExternalLink
+  ExternalLink,
+  MessageSquare
 } from "lucide-react";
 
 interface Project {
@@ -200,14 +201,26 @@ export default function AgentDashboard() {
     <div className="min-h-screen bg-[#0E1117] text-[#E6EDF3] flex flex-col font-sans">
       {/* Top Navigation / Play Nexa Branded Header */}
       <header className="border-b border-neutral-800 px-6 py-4 flex justify-between items-center bg-[#0B0D13]">
-        <div className="flex items-center space-x-3 cursor-pointer" onClick={() => router.push("/agent")}>
-          <div className="h-8 w-8 bg-amber-600 rounded-lg flex items-center justify-center font-bold text-[#0E1117]">
-            N
+        <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3 cursor-pointer" onClick={() => router.push("/agent")}>
+            <div className="h-8 w-8 bg-amber-600 rounded-lg flex items-center justify-center font-bold text-[#0E1117]">
+              N
+            </div>
+            <span className="font-semibold tracking-tight text-lg text-neutral-100">Play Nexa AI</span>
+            <span className="text-[10px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded-full uppercase tracking-wider font-mono font-bold">
+              Agent Workspace
+            </span>
           </div>
-          <span className="font-semibold tracking-tight text-lg text-neutral-100">Play Nexa AI</span>
-          <span className="text-[10px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded-full uppercase tracking-wider font-mono font-bold">
-            Agent Workspace
-          </span>
+
+          <button
+            id="agent-dashboard-ask-btn"
+            onClick={() => router.push("/")}
+            className="flex items-center space-x-1.5 bg-neutral-900 hover:bg-neutral-800 text-xs text-neutral-300 hover:text-white font-mono border border-neutral-800 hover:border-neutral-700 px-3 py-1.5 rounded-lg transition-all cursor-pointer shadow-xs ml-3"
+            title="Return to Main Chat"
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-amber-500" />
+            <span className="font-medium">Ask</span>
+          </button>
         </div>
 
         <div className="relative">
