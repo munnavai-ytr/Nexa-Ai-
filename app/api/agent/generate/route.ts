@@ -5,9 +5,30 @@ import { getKnowledgeItems } from "@/lib/knowledgeStore";
 export async function POST(req: NextRequest) {
   try {
     const { messages, files, projectId, activeFilePath, model, useSearch = true } = await req.json();
-    const effectiveModel = typeof model === "string" && model.trim().length > 0
-      ? (model.trim() === "gemini-2.0-flash-exp" ? "gemini-1.5-flash" : model.trim())
-      : "gemini-1.5-flash";
+    const rawModel = typeof model === "string" && model.trim().length > 0 ? model.trim() : "gemini-3.7-flash";
+    
+    // Map legacy / deprecated models to the active Gemini 3 series
+    let mappedModel = rawModel;
+    if (rawModel.includes("2.5-pro") || rawModel.includes("1.5-pro") || rawModel.includes("3.5-pro")) {
+      mappedModel = "gemini-3.1-pro-preview";
+    } else if (rawModel.includes("3.5-flash-lite") || rawModel.includes("flash-lite")) {
+      mappedModel = "gemini-3.1-flash-lite";
+    } else if (
+      rawModel.includes("2.5-flash") ||
+      rawModel.includes("2.0-flash") ||
+      rawModel.includes("1.5-flash") ||
+      rawModel.includes("1.0-pro") ||
+      rawModel === "gemini-pro"
+    ) {
+      mappedModel = "gemini-3.7-flash";
+    }
+
+    const modelsToTry = [
+      mappedModel,
+      "gemini-3.7-flash",
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-flash-lite"
+    ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json({ error: "messages array is required" }, { status: 400 });
@@ -91,11 +112,26 @@ Project ID: ${projectId || "None"}`;
       config.tools = [{ googleSearch: {} }];
     }
 
-    const response = await ai.models.generateContent({
-      model: effectiveModel,
-      contents,
-      config
-    });
+    let response: any = null;
+    let lastError: any = null;
+
+    for (const modelToCall of modelsToTry) {
+      try {
+        response = await ai.models.generateContent({
+          model: modelToCall,
+          contents,
+          config
+        });
+        if (response) break;
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Model ${modelToCall} failed, trying next fallback:`, err.message);
+      }
+    }
+
+    if (!response) {
+      throw lastError || new Error("Failed to generate content with available Gemini models.");
+    }
 
     const rawText = response.text || "";
     let parsedData;

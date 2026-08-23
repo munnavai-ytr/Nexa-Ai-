@@ -201,18 +201,29 @@ export async function POST(req: NextRequest) {
       };
     });
 
-    const rawModel = typeof model === "string" && model.trim().length > 0 ? model.trim() : "gemini-1.5-flash";
-    const mappedModel = rawModel === "gemini-2.0-flash-exp"
-      ? "gemini-1.5-flash"
-      : rawModel === "gemini-1.0-pro"
-        ? "gemini-1.5-pro"
-        : rawModel;
+    const rawModel = typeof model === "string" && model.trim().length > 0 ? model.trim() : "gemini-3.7-flash";
+    
+    // Map legacy / deprecated models to the active Gemini 3 series
+    let mappedModel = rawModel;
+    if (rawModel.includes("2.5-pro") || rawModel.includes("1.5-pro") || rawModel.includes("3.5-pro")) {
+      mappedModel = "gemini-3.1-pro-preview";
+    } else if (rawModel.includes("3.5-flash-lite") || rawModel.includes("flash-lite")) {
+      mappedModel = "gemini-3.1-flash-lite";
+    } else if (
+      rawModel.includes("2.5-flash") ||
+      rawModel.includes("2.0-flash") ||
+      rawModel.includes("1.5-flash") ||
+      rawModel.includes("1.0-pro") ||
+      rawModel === "gemini-pro"
+    ) {
+      mappedModel = "gemini-3.7-flash";
+    }
 
     const modelsToTry = [
       mappedModel,
-      "gemini-1.5-flash",
-      "gemini-2.0-flash",
-      "gemini-1.5-pro"
+      "gemini-3.7-flash",
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-flash-lite"
     ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
     let systemInstruction = `You are a friendly developer mentor here to explain and solve code problems. Explain your reasoning clearly and concisely. Always structure your answers beautifully with markdown code blocks.`;
