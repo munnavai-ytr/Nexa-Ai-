@@ -616,13 +616,17 @@ What are we coding today?`,
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${userApiKey}`
+          "Authorization": `Bearer ${userApiKey}`,
+          "x-goog-api-key": userApiKey,
+          "x-gemini-api-key": userApiKey
         },
         body: JSON.stringify({ 
           messages: updatedMessages,
           isThinking,
           isDeepResearch,
-          model: selectedModel
+          model: selectedModel,
+          apiKey: userApiKey,
+          userApiKey: userApiKey
         }),
       });
 

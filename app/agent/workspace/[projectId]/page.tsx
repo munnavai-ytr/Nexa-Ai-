@@ -22,7 +22,8 @@ import {
   X,
   File,
   Loader2,
-  Folder
+  Folder,
+  Key
 } from "lucide-react";
 
 interface LogItem {
@@ -54,6 +55,8 @@ export default function WorkspacePage() {
   // Secrets state (just names on the client for security)
   const [secretKeys, setSecretKeys] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [byokApiKey, setByokApiKey] = useState("");
+  const [byokSavedFeedback, setByokSavedFeedback] = useState(false);
   
   // App-wide flags
   const [loading, setLoading] = useState(true);
@@ -198,6 +201,12 @@ export default function WorkspacePage() {
         // Load Secrets list safely
         await fetchSecretsList(isSupabaseActive);
 
+        // Load Global BYOK key
+        const savedByokKey = localStorage.getItem("user_gemini_api_key");
+        if (savedByokKey) {
+          setByokApiKey(savedByokKey);
+        }
+
         // Hydrate initial prompt from Dashboard if present
         const initPrompt = sessionStorage.getItem(`nexa_initial_prompt_${projectId}`);
         if (initPrompt) {
@@ -338,18 +347,27 @@ export default function WorkspacePage() {
 
     try {
       const apiKey = localStorage.getItem("user_gemini_api_key") || "";
+      if (!apiKey.trim()) {
+        setIsSecretsOpen(true);
+        throw new Error("🔑 Gemini API Key required. Please configure your personal Gemini API Key in BYOK Settings.");
+      }
+
       const res = await fetch("/api/agent/generate", {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
+          "Authorization": `Bearer ${apiKey.trim()}`,
+          "x-goog-api-key": apiKey.trim(),
+          "x-gemini-api-key": apiKey.trim()
         },
         body: JSON.stringify({
           messages: updatedMessages,
           files,
           projectId,
           activeFilePath: activeFile,
-          model: selectedModel
+          model: selectedModel,
+          apiKey: apiKey.trim(),
+          userApiKey: apiKey.trim()
         })
       });
 
@@ -1208,7 +1226,63 @@ export default function WorkspacePage() {
                 </button>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-5">
+                {/* Global BYOK API Key Section */}
+                <div className="bg-neutral-900/60 border border-amber-800/30 rounded-xl p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold text-amber-400 flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5" />
+                      Global Gemini API Key (BYOK)
+                    </label>
+                    {byokSavedFeedback && (
+                      <span className="text-[10px] text-green-400 font-mono">Saved!</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-neutral-400 font-sans leading-relaxed">
+                    Enter your personal Gemini API key. It is stored globally in your browser and used for all Chat and Agent AI requests.
+                  </p>
+                  <div className="space-y-2">
+                    <input
+                      type="password"
+                      value={byokApiKey}
+                      onChange={(e) => {
+                        setByokApiKey(e.target.value);
+                        setByokSavedFeedback(false);
+                      }}
+                      placeholder="AIzaSy..."
+                      className="w-full bg-neutral-950 border border-neutral-800 px-2.5 py-1.5 rounded-lg text-xs font-mono text-neutral-200 focus:outline-none focus:border-amber-700"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (byokApiKey.trim()) {
+                            localStorage.setItem("user_gemini_api_key", byokApiKey.trim());
+                            setByokSavedFeedback(true);
+                            setTimeout(() => setByokSavedFeedback(false), 2500);
+                          }
+                        }}
+                        disabled={!byokApiKey.trim()}
+                        className="flex-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-neutral-950 font-bold py-1 rounded-lg text-xs cursor-pointer font-sans transition-colors"
+                      >
+                        Save BYOK Key
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          localStorage.removeItem("user_gemini_api_key");
+                          setByokApiKey("");
+                          setByokSavedFeedback(false);
+                        }}
+                        disabled={!byokApiKey}
+                        className="px-3 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 text-neutral-300 py-1 rounded-lg text-xs cursor-pointer font-sans transition-colors"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 <div>
                   <label className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 block mb-1.5">
                     Workspace Secrets (Names Only)
@@ -1263,7 +1337,7 @@ export default function WorkspacePage() {
                   </div>
                   <button
                     type="submit"
-                    className="w-full bg-amber-600 hover:bg-amber-500 text-[#0E1117] font-bold py-1.5 rounded-lg text-xs cursor-pointer font-sans"
+                    className="w-full bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-semibold py-1.5 rounded-lg text-xs cursor-pointer font-sans border border-neutral-700"
                   >
                     Add Secret Pair
                   </button>

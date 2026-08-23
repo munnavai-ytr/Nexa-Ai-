@@ -3,6 +3,7 @@ import { Pinecone } from "@pinecone-database/pinecone";
 import { NextRequest, NextResponse } from "next/server";
 import { getKnowledgeItems } from "@/lib/knowledgeStore";
 
+// Helper to parse and format Gemini errors
 function parseGeminiError(err: any): { message: string; status: number } {
   let errStr = err?.message || String(err);
   let status = err?.status || err?.code || 500;
@@ -30,33 +31,34 @@ function parseGeminiError(err: any): { message: string; status: number } {
     };
   }
 
-  if (status === 429 || errStr.includes("429") || errStr.toLowerCase().includes("quota") || errStr.toLowerCase().includes("too many requests")) {
+  if (status === 429 || errStr.includes("429") || errStr.toLowerCase().includes("quota") || errStr.toLowerCase().includes("too many requests") || errStr.toLowerCase().includes("rate limit")) {
     return {
-      message: "⏳ Rate limit reached (429 Too Many Requests). Please wait a few seconds before sending another message.",
+      message: "⏳ Rate limit or quota exhausted (429 Too Many Requests). Please verify your personal Gemini API Key in BYOK Settings or wait a moment.",
       status: 429
     };
   }
 
-  if (status === 401 || status === 403 || errStr.toLowerCase().includes("api key") || errStr.toLowerCase().includes("authentication") || errStr.toLowerCase().includes("permission")) {
+  if (status === 401 || status === 403 || errStr.toLowerCase().includes("api key") || errStr.toLowerCase().includes("authentication") || errStr.toLowerCase().includes("permission") || errStr.toLowerCase().includes("api_key_invalid")) {
     return {
-      message: "🔑 Authentication failed or API key is missing/invalid. Please verify your GEMINI_API_KEY configuration.",
+      message: "🔑 Authentication failed. Please check or re-enter your personal Gemini API Key in BYOK Settings.",
       status: status === 401 || status === 403 ? status : 401
     };
   }
 
   return {
-    message: errStr.length > 200 ? "An unexpected error occurred while communicating with the AI service." : errStr,
+    message: errStr.length > 250 ? "An unexpected error occurred while communicating with the AI service." : errStr,
     status: typeof status === 'number' ? status : 500
   };
 }
 
 export async function POST(req: NextRequest) {
-  // Enforce a strict 20-second backend timeout
+  // Enforce a strict 25-second backend timeout
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000);
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
 
   try {
-    const { messages, isThinking, isDeepResearch, model } = await req.json();
+    const body = await req.json();
+    const { messages, isThinking, isDeepResearch, model, apiKey, userApiKey: bodyApiKey } = body;
 
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json(
@@ -65,22 +67,32 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Extract the User's Personal Gemini API Key from the Authorization header (BYOK model)
-    const authHeader = req.headers.get("Authorization");
-    let userApiKey = "";
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      userApiKey = authHeader.substring(7).trim();
+    // Extract user-provided custom key from headers or request body (Unified BYOK)
+    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
+    let userKey = req.headers.get("x-goog-api-key") || req.headers.get("x-gemini-api-key") || "";
+    
+    if (!userKey && authHeader && authHeader.startsWith("Bearer ")) {
+      userKey = authHeader.substring(7).trim();
+    }
+    if (!userKey && apiKey && typeof apiKey === "string") {
+      userKey = apiKey.trim();
+    }
+    if (!userKey && bodyApiKey && typeof bodyApiKey === "string") {
+      userKey = bodyApiKey.trim();
     }
 
-    if (!userApiKey) {
+    // Prioritize user's custom key, fall back to server env if configured
+    const finalApiKey = userKey || process.env.GEMINI_API_KEY?.trim() || "";
+
+    if (!finalApiKey) {
       return NextResponse.json(
-        { error: "🔑 Unauthorized. Your personal Gemini API Key is missing. Please configure it in Settings." },
+        { error: "🔑 Gemini API Key required. Please configure your personal Gemini API Key in BYOK Settings (top navigation bar)." },
         { status: 401 }
       );
     }
 
     const ai = new GoogleGenAI({
-      apiKey: userApiKey,
+      apiKey: finalApiKey,
       httpOptions: {
         headers: { 'User-Agent': 'aistudio-build' }
       }
@@ -226,7 +238,12 @@ export async function POST(req: NextRequest) {
       "gemini-3.1-flash-lite"
     ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
-    let systemInstruction = `You are a friendly developer mentor here to explain and solve code problems. Explain your reasoning clearly and concisely. Always structure your answers beautifully with markdown code blocks.`;
+    let systemInstruction = `You are Play Nexa AI, a friendly, versatile, and highly intelligent AI coding mentor and software architect.
+
+CORE CONVERSATIONAL GUIDELINES:
+1. GREETINGS & GENERAL QUESTIONS: When the user sends greetings (e.g., "Hi", "Hello", "Hey", "How are you?"), casual conversation, or asks broad non-coding questions, respond warmly, conversationally, and concisely in natural text. DO NOT generate code blocks, dummy programming boilerplate, or unsolicited script snippets for greetings or general chit-chat.
+2. TECHNICAL & CODING QUERIES: ONLY output markdown code blocks when the user explicitly requests code, programming assistance, script writing, bug fixes, architecture implementation, or algorithmic solutions.
+3. CONVERSATIONAL TONE: Keep conversational answers engaging, clear, helpful, and direct. When code IS requested, structure your answers with clear explanations and clean, production-grade syntax.`;
 
     if (isThinking) {
       systemInstruction += `\n\nCRITICAL: Think step-by-step and output your detailed internal reasoning inside <thought> tags before providing the final answer.`;

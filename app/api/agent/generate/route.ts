@@ -2,9 +2,58 @@ import { GoogleGenAI } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 import { getKnowledgeItems } from "@/lib/knowledgeStore";
 
+// Helper to parse and format Gemini errors
+function parseAgentGeminiError(err: any): { message: string; status: number } {
+  let errStr = err?.message || String(err);
+  let status = err?.status || err?.code || 500;
+
+  try {
+    if (errStr.includes("{")) {
+      const jsonStart = errStr.indexOf("{");
+      const jsonStr = errStr.substring(jsonStart);
+      const parsed = JSON.parse(jsonStr);
+      if (parsed?.error?.code) {
+        status = parsed.error.code;
+      }
+      if (parsed?.error?.message) {
+        errStr = parsed.error.message;
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  if (status === 503 || errStr.includes("503") || errStr.toLowerCase().includes("overloaded") || errStr.toLowerCase().includes("high demand") || errStr.toLowerCase().includes("unavailable")) {
+    return {
+      message: "🧠 AI models are currently handling heavy traffic (503). Retrying...",
+      status: 503
+    };
+  }
+
+  if (status === 429 || errStr.includes("429") || errStr.toLowerCase().includes("quota") || errStr.toLowerCase().includes("too many requests") || errStr.toLowerCase().includes("rate limit")) {
+    return {
+      message: "⏳ Rate limit or quota exhausted (429 Too Many Requests). Please verify your personal Gemini API Key in BYOK Settings or wait a moment.",
+      status: 429
+    };
+  }
+
+  if (status === 401 || status === 403 || errStr.toLowerCase().includes("api key") || errStr.toLowerCase().includes("authentication") || errStr.toLowerCase().includes("permission") || errStr.toLowerCase().includes("api_key_invalid")) {
+    return {
+      message: "🔑 Authentication failed. Please check or re-enter your personal Gemini API Key in BYOK Settings.",
+      status: status === 401 || status === 403 ? status : 401
+    };
+  }
+
+  return {
+    message: errStr.length > 250 ? "An unexpected error occurred while communicating with the AI service." : errStr,
+    status: typeof status === 'number' ? status : 500
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const { messages, files, projectId, activeFilePath, model, useSearch = true } = await req.json();
+    const body = await req.json();
+    const { messages, files, projectId, activeFilePath, model, useSearch = true, apiKey, userApiKey: bodyApiKey } = body;
     const rawModel = typeof model === "string" && model.trim().length > 0 ? model.trim() : "gemini-3.7-flash";
     
     // Map legacy / deprecated models to the active Gemini 3 series
@@ -34,22 +83,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "messages array is required" }, { status: 400 });
     }
 
-    // Extract the User's Personal Gemini API Key from the Authorization header (BYOK model)
-    const authHeader = req.headers.get("Authorization");
-    let userApiKey = "";
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      userApiKey = authHeader.substring(7).trim();
+    // Extract user-provided custom key from headers or request body (Unified BYOK)
+    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
+    let userKey = req.headers.get("x-goog-api-key") || req.headers.get("x-gemini-api-key") || "";
+    
+    if (!userKey && authHeader && authHeader.startsWith("Bearer ")) {
+      userKey = authHeader.substring(7).trim();
+    }
+    if (!userKey && apiKey && typeof apiKey === "string") {
+      userKey = apiKey.trim();
+    }
+    if (!userKey && bodyApiKey && typeof bodyApiKey === "string") {
+      userKey = bodyApiKey.trim();
     }
 
-    if (!userApiKey) {
+    // Prioritize user's custom key, fall back to server env if configured
+    const finalApiKey = userKey || process.env.GEMINI_API_KEY?.trim() || "";
+
+    if (!finalApiKey) {
       return NextResponse.json(
-        { error: "Your personal Gemini API Key is missing. Please configure it in Settings." },
+        { error: "🔑 Gemini API Key required. Please configure your personal Gemini API Key in BYOK Settings." },
         { status: 401 }
       );
     }
 
     const ai = new GoogleGenAI({
-      apiKey: userApiKey,
+      apiKey: finalApiKey,
       httpOptions: {
         headers: { 'User-Agent': 'aistudio-build' }
       }
@@ -130,7 +189,11 @@ Project ID: ${projectId || "None"}`;
     }
 
     if (!response) {
-      throw lastError || new Error("Failed to generate content with available Gemini models.");
+      const parsed = parseAgentGeminiError(lastError);
+      return NextResponse.json(
+        { error: parsed.message },
+        { status: parsed.status }
+      );
     }
 
     const rawText = response.text || "";
@@ -166,6 +229,7 @@ Project ID: ${projectId || "None"}`;
 
   } catch (err: any) {
     console.error("Agent Generate error:", err);
-    return NextResponse.json({ error: err.message || "Internal server error" }, { status: 500 });
+    const parsed = parseAgentGeminiError(err);
+    return NextResponse.json({ error: parsed.message || "Internal server error" }, { status: parsed.status });
   }
 }
