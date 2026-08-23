@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Extract user-provided custom key from headers or request body (Unified BYOK)
+    // Extract user-provided custom key from headers or request body (Strict BYOK Enforcement)
     const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
     let userKey = req.headers.get("x-goog-api-key") || req.headers.get("x-gemini-api-key") || "";
     
@@ -81,12 +81,12 @@ export async function POST(req: NextRequest) {
       userKey = bodyApiKey.trim();
     }
 
-    // Prioritize user's custom key, fall back to server env if configured
-    const finalApiKey = userKey || process.env.GEMINI_API_KEY?.trim() || "";
+    // MANDATORY BYOK: Use ONLY the extracted key. Do NOT fallback to server env key.
+    const finalApiKey = userKey;
 
-    if (!finalApiKey) {
+    if (!finalApiKey || finalApiKey.length < 10) {
       return NextResponse.json(
-        { error: "🔑 Gemini API Key required. Please configure your personal Gemini API Key in BYOK Settings (top navigation bar)." },
+        { error: "🔑 Missing or Invalid BYOK API Key. Please configure your personal Gemini API Key in BYOK Settings to use Play Nexa AI." },
         { status: 401 }
       );
     }
