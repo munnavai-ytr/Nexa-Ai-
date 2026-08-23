@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-inter), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-jetbrains), monospace;
+}
+
+/* Premium minimal scrollbar just like Claude */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #E5E1D8;
+  border-radius: 9999px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #2E2E2E;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #D6CFAF;
+}
+
+/* Base custom font configuration fallback */
+body {
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Markdown parsing rendering helpers to ensure pristine typography layout */
+.markdown-content p {
+  margin-bottom: 1rem;
+  line-height: 1.65;
+}
+
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content ul {
+  list-style-type: disc;
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+  padding-left: 1.25rem;
+}
+
+.markdown-content ol {
+  list-style-type: decimal;
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+  padding-left: 1.25rem;
+}
+
+.markdown-content li {
+  margin-bottom: 0.25rem;
+  line-height: 1.6;
+}
+
+.markdown-content li:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content h3 {
+  font-weight: 700;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Subtle amber-themed text selection styling */
+::selection {
+  background-color: rgba(120, 53, 4, 0.12); /* amber-900 tint */
+  color: inherit;
+}
+
+.dark ::selection {
+  background-color: rgba(254, 243, 199, 0.15); /* amber-100 tint */
+  color: inherit;
+}
+

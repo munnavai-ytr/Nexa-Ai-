@@ -1,0 +1,5 @@
+Tailwind CSS & Interface Design Guidelines:
+1. Always style components using Tailwind utility classes directly for fast responsive layouts.
+2. Ensure container outer padding meets or exceeds child element spacing.
+3. Keep container corners soft (rounded caps are optimal at 12px or 16px).
+4. Restrict accent visual borders from conflicting with corner curves.
