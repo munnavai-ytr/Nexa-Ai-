@@ -1,6 +1,6 @@
 {
   "name": "AI Coding Assistant Platform",
-  "description": "An elegant, minimalist AI coding companion and API key developer dashboard inspired by Claude.",
+  "description": "An elite AI coding companion platform strictly configured for React, Tailwind, and Sandpack-ready browser-side applications.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

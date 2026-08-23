@@ -291,32 +291,72 @@ export default function WorkspacePage() {
     return () => mediaQuery.removeEventListener("change", handleViewportChange);
   }, [projectId]);
 
-  // Compiler live preview output compilation
+  // Compiler live preview output compilation with React/Tailwind/Lucide Sandpack runner
   useEffect(() => {
     if (Object.keys(files).length === 0) return;
 
     try {
+      // Gather any auxiliary TSX/JSX components created in the workspace
+      const supportingFiles = Object.entries(files)
+        .filter(([filename]) => filename !== "App.tsx" && (filename.endsWith(".tsx") || filename.endsWith(".jsx") || filename.endsWith(".ts") || filename.endsWith(".js")) && filename !== "package.json")
+        .map(([filename, content]) => {
+          // Normalize exports for single-bundle evaluation
+          const cleaned = content.replace(/export\s+default\s+/g, "/* export default */ ");
+          return `// File: ${filename}\n${cleaned}`;
+        })
+        .join("\n\n");
+
+      const appFileContent = files["App.tsx"] || files["App.jsx"] || files["App.js"] || `export default function App() { return <div className="p-6">Ready</div>; }`;
+
       const htmlContent = files["index.html"] || `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://cdn.tailwindcss.com"></script>
-  <style>${files["styles.css"] || ""}</style>
+  <style>
+    ${files["styles.css"] || ""}
+    body { margin: 0; padding: 0; background-color: #0e1117; color: #f3f4f6; font-family: ui-sans-serif, system-ui, sans-serif; }
+  </style>
+  <script src="https://unpkg.com/@babel/standalone@7.24.4/babel.min.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@19?dev",
+        "react/": "https://esm.sh/react@19/",
+        "react-dom": "https://esm.sh/react-dom@19?dev",
+        "react-dom/client": "https://esm.sh/react-dom@19/client?dev",
+        "lucide-react": "https://esm.sh/lucide-react@latest"
+      }
+    }
+  </script>
 </head>
-<body class="bg-neutral-950 text-white min-h-screen">
+<body class="bg-[#0E1117] text-white min-h-screen">
   <div id="root"></div>
-  <script type="module">
-    import React, { useState, useEffect } from 'https://esm.sh/react@19?dev';
-    import ReactDOM from 'https://esm.sh/react-dom@19/client?dev';
+  <script type="text/babel" data-type="module" data-presets="react,typescript">
+    import React, { useState, useEffect, useRef, useMemo, useCallback, useReducer } from 'react';
+    import ReactDOM from 'react-dom/client';
+    import * as LucideIcons from 'lucide-react';
+
+    // Supporting components
+    ${supportingFiles}
+
+    // Main App Component
+    ${appFileContent}
 
     try {
-      ${compileCodeToESM(files["App.tsx"] || "")}
-      
-      const root = ReactDOM.createRoot(document.getElementById('root'));
-      root.render(React.createElement(App));
+      const rootElement = document.getElementById('root');
+      if (rootElement) {
+        const root = ReactDOM.createRoot(rootElement);
+        const ComponentToMount = typeof App !== 'undefined' ? App : null;
+        if (ComponentToMount) {
+          root.render(React.createElement(ComponentToMount));
+        } else {
+          root.render(React.createElement('div', { className: 'p-6 text-neutral-400 font-mono text-xs' }, 'No default App component found.'));
+        }
+      }
     } catch (err) {
-      console.error(err);
+      console.error("Preview render exception:", err);
       window.parent.postMessage({ type: 'PREVIEW_ERROR', message: err.message, stack: err.stack }, '*');
     }
   </script>
@@ -960,12 +1000,12 @@ export default function WorkspacePage() {
 
             {/* Column 3: Preview Box & Operational Logs */}
             <div className="w-[34%] min-w-[340px] flex flex-col divide-y divide-neutral-800 bg-[#0E1117] overflow-hidden">
-              {/* Live Preview Pane */}
+              {/* Sandpack Preview Pane */}
               <div className="flex-1 flex flex-col overflow-hidden bg-neutral-950">
                 <div className="h-10 border-b border-neutral-800 px-4 flex items-center justify-between bg-[#0B0D13]">
                   <div className="flex items-center space-x-2">
                     <Eye className="w-4 h-4 text-amber-500" />
-                    <span className="text-xs font-mono text-neutral-300">Live Preview</span>
+                    <span className="text-xs font-mono text-neutral-300">Sandpack Preview</span>
                   </div>
                   <button 
                     onClick={() => setPreviewKey(k => k + 1)}
@@ -1224,11 +1264,11 @@ export default function WorkspacePage() {
                 </div>
               )}
 
-              {/* Mobile Tab 4: Preview (Live App iframe) */}
+              {/* Mobile Tab 4: Preview (Sandpack Live App iframe) */}
               {activeMobileTab === "preview" && (
                 <div className="absolute inset-0 flex flex-col bg-neutral-950 overflow-hidden">
                   <div className="h-10 border-b border-neutral-800 px-4 flex items-center justify-between bg-[#0B0D13]">
-                    <span className="text-xs font-mono text-neutral-300">Live Preview Output</span>
+                    <span className="text-xs font-mono text-neutral-300">Sandpack Preview Output</span>
                     <button 
                       onClick={() => setPreviewKey(k => k + 1)}
                       className="text-[10px] bg-neutral-900 border border-neutral-800 px-2 py-0.5 rounded text-neutral-400 cursor-pointer"
