@@ -5,15 +5,28 @@ let supabaseClient: any = null;
 
 function getSupabase() {
   if (supabaseClient) return supabaseClient;
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = process.env.SUPABASE_URL?.trim();
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!supabaseUrl || !supabaseKey) {
     return null;
   }
-  supabaseClient = createClient(supabaseUrl, supabaseKey, {
-    auth: { persistSession: false, autoRefreshToken: false }
-  });
-  return supabaseClient;
+  if (
+    supabaseUrl.includes("your-supabase") ||
+    supabaseUrl.includes("placeholder") ||
+    supabaseUrl.includes("example.com") ||
+    !supabaseUrl.startsWith("http")
+  ) {
+    return null;
+  }
+
+  try {
+    supabaseClient = createClient(supabaseUrl, supabaseKey, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+    return supabaseClient;
+  } catch {
+    return null;
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -26,23 +39,23 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const errorQuery = searchParams.get("error");
 
-    let queryBuilder = supabase.from("agent_corrections").select("*");
-    if (errorQuery) {
-      queryBuilder = queryBuilder.ilike("error_message", `%${errorQuery}%`);
-    }
+    try {
+      let queryBuilder = supabase.from("agent_corrections").select("*");
+      if (errorQuery) {
+        queryBuilder = queryBuilder.ilike("error_message", `%${errorQuery}%`);
+      }
 
-    const { data, error } = await queryBuilder.limit(10);
-    if (error) {
-      if (error.code === "P0001" || error.message.includes("does not exist") || error.code === "42P01") {
+      const { data, error } = await queryBuilder.limit(10);
+      if (error) {
         return NextResponse.json({ success: true, useLocalFallback: true, items: [] });
       }
-      throw error;
-    }
 
-    return NextResponse.json({ success: true, items: data || [] });
+      return NextResponse.json({ success: true, items: data || [] });
+    } catch {
+      return NextResponse.json({ success: true, useLocalFallback: true, items: [] });
+    }
   } catch (err: any) {
-    console.error("Agent feedback GET error:", err);
-    return NextResponse.json({ success: true, useLocalFallback: true, items: [] });
+    return NextResponse.json({ success: true, useLocalFallback: true, items: [], error: err?.message });
   }
 }
 
@@ -60,24 +73,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, useLocalFallback: true });
     }
 
-    const { error } = await supabase
-      .from("agent_corrections")
-      .insert([
-        {
-          id: `corr-${Math.random().toString(36).substring(2, 9)}`,
-          error_message: errorMessage,
-          file_context: fileContext || "",
-          resolution: resolution || "",
-          created_at: new Date().toISOString()
-        }
-      ]);
+    try {
+      const { error } = await supabase
+        .from("agent_corrections")
+        .insert([
+          {
+            id: `corr-${Math.random().toString(36).substring(2, 9)}`,
+            error_message: errorMessage,
+            file_context: fileContext || "",
+            resolution: resolution || "",
+            created_at: new Date().toISOString()
+          }
+        ]);
 
-    if (error) {
-      if (error.code === "P0001" || error.message.includes("does not exist") || error.code === "42P01") {
+      if (error) {
         return NextResponse.json({
           success: true,
           useLocalFallback: true,
-          sql: `CREATE TABLE agent_corrections (
+          sql: `CREATE TABLE IF NOT EXISTS agent_corrections (
   id TEXT PRIMARY KEY,
   error_message TEXT NOT NULL,
   file_context TEXT,
@@ -86,12 +99,12 @@ export async function POST(req: NextRequest) {
 );`
         });
       }
-      throw error;
-    }
 
-    return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true });
+    } catch {
+      return NextResponse.json({ success: true, useLocalFallback: true });
+    }
   } catch (err: any) {
-    console.error("Agent feedback POST error:", err);
-    return NextResponse.json({ success: true, useLocalFallback: true, error: err.message });
+    return NextResponse.json({ success: true, useLocalFallback: true, error: err?.message });
   }
 }

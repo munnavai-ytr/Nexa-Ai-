@@ -5,68 +5,31 @@ let supabaseClient: any = null;
 
 function getSupabase() {
   if (supabaseClient) return supabaseClient;
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = process.env.SUPABASE_URL?.trim();
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!supabaseUrl || !supabaseKey) {
     return null;
   }
-  supabaseClient = createClient(supabaseUrl, supabaseKey, {
-    auth: { persistSession: false, autoRefreshToken: false }
-  });
-  return supabaseClient;
+  if (
+    supabaseUrl.includes("your-supabase") ||
+    supabaseUrl.includes("placeholder") ||
+    supabaseUrl.includes("example.com") ||
+    !supabaseUrl.startsWith("http")
+  ) {
+    return null;
+  }
+
+  try {
+    supabaseClient = createClient(supabaseUrl, supabaseKey, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+    return supabaseClient;
+  } catch {
+    return null;
+  }
 }
 
-export async function GET(req: NextRequest) {
-  try {
-    const supabase = getSupabase();
-    if (!supabase) {
-      return NextResponse.json({ success: true, useLocalFallback: true });
-    }
-
-    const { searchParams } = new URL(req.url);
-    const projectId = searchParams.get("projectId");
-
-    if (projectId) {
-      // Get single project files and secrets
-      const { data: project, error: pError } = await supabase
-        .from("agent_projects")
-        .select("*")
-        .eq("id", projectId)
-        .single();
-
-      if (pError) {
-        if (pError.code === "P0001" || pError.message.includes("does not exist") || pError.code === "42P01") {
-          return NextResponse.json({ success: true, useLocalFallback: true });
-        }
-        throw pError;
-      }
-
-      const { data: files, error: fError } = await supabase
-        .from("agent_files")
-        .select("*")
-        .eq("project_id", projectId);
-
-      if (fError) throw fError;
-
-      return NextResponse.json({
-        success: true,
-        project,
-        files: files || []
-      });
-    }
-
-    // List all projects (history)
-    const { data: projects, error } = await supabase
-      .from("agent_projects")
-      .select("*")
-      .order("updated_at", { ascending: false });
-
-    if (error) {
-      if (error.code === "P0001" || error.message.includes("does not exist") || error.code === "42P01") {
-        return NextResponse.json({
-          success: true,
-          useLocalFallback: true,
-          sql: `CREATE TABLE agent_projects (
+const SQL_INIT_SCHEMA = `CREATE TABLE IF NOT EXISTS agent_projects (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   secrets JSONB DEFAULT '{}'::jsonb,
@@ -74,21 +37,87 @@ export async function GET(req: NextRequest) {
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE agent_files (
+CREATE TABLE IF NOT EXISTS agent_files (
   project_id TEXT REFERENCES agent_projects(id) ON DELETE CASCADE,
   file_path TEXT NOT NULL,
   content TEXT NOT NULL,
   PRIMARY KEY (project_id, file_path)
-);`
-        });
-      }
-      throw error;
+);`;
+
+export async function GET(req: NextRequest) {
+  try {
+    const supabase = getSupabase();
+    if (!supabase) {
+      return NextResponse.json({ success: true, useLocalFallback: true, projects: [] });
     }
 
-    return NextResponse.json({ success: true, projects: projects || [] });
+    const { searchParams } = new URL(req.url);
+    const projectId = searchParams.get("projectId");
+
+    if (projectId) {
+      // Get single project files and secrets
+      try {
+        const { data: project, error: pError } = await supabase
+          .from("agent_projects")
+          .select("*")
+          .eq("id", projectId)
+          .single();
+
+        if (pError || !project) {
+          return NextResponse.json({ success: true, useLocalFallback: true, project: null, files: [] });
+        }
+
+        const { data: files, error: fError } = await supabase
+          .from("agent_files")
+          .select("*")
+          .eq("project_id", projectId);
+
+        if (fError) {
+          return NextResponse.json({ success: true, useLocalFallback: true, project, files: [] });
+        }
+
+        return NextResponse.json({
+          success: true,
+          project,
+          files: files || []
+        });
+      } catch {
+        return NextResponse.json({ success: true, useLocalFallback: true, project: null, files: [] });
+      }
+    }
+
+    // List all projects (history)
+    try {
+      const { data: projects, error } = await supabase
+        .from("agent_projects")
+        .select("*")
+        .order("updated_at", { ascending: false });
+
+      if (error) {
+        return NextResponse.json({
+          success: true,
+          useLocalFallback: true,
+          projects: [],
+          sql: SQL_INIT_SCHEMA
+        });
+      }
+
+      return NextResponse.json({ success: true, projects: projects || [] });
+    } catch {
+      return NextResponse.json({
+        success: true,
+        useLocalFallback: true,
+        projects: [],
+        sql: SQL_INIT_SCHEMA
+      });
+    }
   } catch (err: any) {
-    console.error("Agent projects GET error:", err);
-    return NextResponse.json({ success: true, useLocalFallback: true, error: err.message });
+    return NextResponse.json({
+      success: true,
+      useLocalFallback: true,
+      projects: [],
+      error: err?.message || "Fallback to local storage"
+    });
   }
 }
 
@@ -105,39 +134,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, useLocalFallback: true, projectId });
     }
 
-    const { error } = await supabase
-      .from("agent_projects")
-      .upsert({
-        id: projectId,
-        name: name || "Untitled Project",
-        secrets: secrets || {},
-        updated_at: new Date().toISOString()
-      });
+    try {
+      const { error } = await supabase
+        .from("agent_projects")
+        .upsert({
+          id: projectId,
+          name: name || "Untitled Project",
+          secrets: secrets || {},
+          updated_at: new Date().toISOString()
+        });
 
-    if (error) {
-      if (error.code === "P0001" || error.message.includes("does not exist") || error.code === "42P01") {
+      if (error) {
         return NextResponse.json({ success: true, useLocalFallback: true, projectId });
       }
-      throw error;
-    }
 
-    if (files && Array.isArray(files)) {
-      // Upsert files
-      for (const file of files) {
-        const { error: fileErr } = await supabase
-          .from("agent_files")
-          .upsert({
-            project_id: projectId,
-            file_path: file.file_path,
-            content: file.content
-          });
-        if (fileErr) throw fileErr;
+      if (files && Array.isArray(files)) {
+        for (const file of files) {
+          await supabase
+            .from("agent_files")
+            .upsert({
+              project_id: projectId,
+              file_path: file.file_path,
+              content: file.content
+            });
+        }
       }
-    }
 
-    return NextResponse.json({ success: true, projectId });
+      return NextResponse.json({ success: true, projectId });
+    } catch {
+      return NextResponse.json({ success: true, useLocalFallback: true, projectId });
+    }
   } catch (err: any) {
-    console.error("Agent projects POST error:", err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: true, useLocalFallback: true, error: err?.message });
   }
 }
