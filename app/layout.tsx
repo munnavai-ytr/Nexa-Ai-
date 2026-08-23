@@ -1,6 +1,7 @@
 import type {Metadata} from 'next';
 import './globals.css'; // Global styles
 import SplashScreen from '@/components/SplashScreen';
+import {Analytics} from '@vercel/analytics/next';
 
 export const metadata: Metadata = {
   title: 'Play Nexa AI — Autonomous Coding & Deep Research Engine',
@@ -28,6 +29,7 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
         <main className="flex-grow">
           {children}
         </main>
+        <Analytics />
       </body>
     </html>
   );
