@@ -2661,6 +2661,9 @@ What are we coding today?`,
                     <option value="gemini-3.7-flash">gemini-3.7-flash</option>
                     <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
                     <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
+                    <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                    <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                    <option value="gemini-1.5-flash">gemini-1.5-flash</option>
                   </select>
                 </div>
 

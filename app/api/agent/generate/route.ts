@@ -1,6 +1,7 @@
 import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 import { getKnowledgeItems } from "@/lib/knowledgeStore";
+import { sanitizeModelName, STABLE_FALLBACK_MODEL } from "@/lib/gemini-utils";
 
 // Helper to parse and format Gemini errors
 function parseAgentGeminiError(err: any): { message: string; status: number } {
@@ -44,6 +45,13 @@ function parseAgentGeminiError(err: any): { message: string; status: number } {
     };
   }
 
+  if (status === 404 || errStr.toLowerCase().includes("not found") || errStr.toLowerCase().includes("invalid model")) {
+    return {
+      message: "🧩 The requested AI model was not found or is currently unavailable. Nexa AI is automatically attempting to use a fallback model.",
+      status: 404
+    };
+  }
+
   return {
     message: errStr.length > 250 ? "An unexpected error occurred while communicating with the AI service." : errStr,
     status: typeof status === 'number' ? status : 500
@@ -54,32 +62,18 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { messages, files, projectId, activeFilePath, model, useSearch = true, apiKey, userApiKey: bodyApiKey } = body;
-    const rawModel = typeof model === "string" && model.trim().length > 0 ? model.trim() : "gemini-3.7-flash";
+    const requestedModel = typeof model === "string" && model.trim().length > 0 ? model.trim() : "gemini-3.7-flash";
+    const sanitizedModel = sanitizeModelName(requestedModel);
     
-    // Map legacy / deprecated models to the active Gemini 3 series
-    let mappedModel = rawModel;
-    if (rawModel.includes("2.5-pro") || rawModel.includes("1.5-pro") || rawModel.includes("3.5-pro")) {
-      mappedModel = "gemini-3.1-pro-preview";
-    } else if (rawModel.includes("3.5-flash-lite") || rawModel.includes("flash-lite")) {
-      mappedModel = "gemini-3.1-flash-lite";
-    } else if (
-      rawModel.includes("2.5-flash") ||
-      rawModel.includes("2.0-flash") ||
-      rawModel.includes("1.5-flash") ||
-      rawModel.includes("1.0-pro") ||
-      rawModel === "gemini-pro"
-    ) {
-      mappedModel = "gemini-3.7-flash";
-    }
-
     const modelsToTry = [
-      mappedModel,
+      sanitizedModel,
       "gemini-3.7-flash",
       "gemini-3.1-flash-lite",
       "gemini-1.5-flash",
       "gemini-1.5-flash-8b",
       "gemini-3.1-pro-preview",
-      "gemini-1.5-pro"
+      "gemini-1.5-pro",
+      STABLE_FALLBACK_MODEL
     ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
     if (!messages || !Array.isArray(messages)) {

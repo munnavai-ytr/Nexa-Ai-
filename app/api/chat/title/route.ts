@@ -1,5 +1,6 @@
 import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
+import { STABLE_FALLBACK_MODEL } from "@/lib/gemini-utils";
 
 export async function POST(req: NextRequest) {
   try {
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
       }
     });
 
-    const modelsToTry = ["gemini-3.1-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
+    const modelsToTry = ["gemini-3.1-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b", STABLE_FALLBACK_MODEL];
     let response;
     let lastErr;
 
