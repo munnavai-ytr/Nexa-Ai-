@@ -55,6 +55,11 @@ interface Message {
   timestamp: string;
   sources?: SourceAttribution[];
   sourceType?: string;
+  usage?: {
+    promptTokens?: number;
+    candidatesTokens?: number;
+    totalTokens?: number;
+  };
 }
 
 interface ChatSession {
@@ -62,6 +67,11 @@ interface ChatSession {
   title: string;
   messages: Message[];
   created: string;
+  lastUsage?: {
+    promptTokens?: number;
+    candidatesTokens?: number;
+    totalTokens?: number;
+  };
 }
 
 interface ApiKey {
@@ -112,6 +122,12 @@ export default function Home() {
   const [selectedModel, setSelectedModel] = useState("gemini-3.7-flash");
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [codeViewModes, setCodeViewModes] = useState<Record<string, "code" | "diff">>({});
+  const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
+  const [sessionTokenUsage, setSessionTokenUsage] = useState<{
+    promptTokens: number;
+    candidatesTokens: number;
+    totalTokens: number;
+  } | null>(null);
 
   // API Key States
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
@@ -481,30 +497,63 @@ What are we coding today?`,
     }
   };
 
-  // Handle Export Chat
-  const handleExportChat = () => {
-    if (!activeChat) return;
-    const lines = [
-      `========================================`,
-      `Nexa AI Coding Assistant - Chat Export`,
-      `Title: ${activeChat.title}`,
-      `Date: ${activeChat.created}`,
-      `Model: ${selectedModel}`,
-      `========================================`,
-      ``
-    ];
+  // Handle Export Chat to JSON or Markdown
+  const handleExportChat = (format: "json" | "md" = "md") => {
+    setIsExportDropdownOpen(false);
+    if (!activeChat || activeChat.messages.length === 0) return;
 
-    activeChat.messages.forEach((msg) => {
-      lines.push(`[${msg.timestamp}] ${msg.role.toUpperCase()}:`);
-      lines.push(msg.content);
-      lines.push(`----------------------------------------`);
-    });
+    let content = "";
+    let mimeType = "text/plain;charset=utf-8";
+    let extension = format;
 
-    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    if (format === "json") {
+      mimeType = "application/json;charset=utf-8";
+      const exportData = {
+        title: activeChat.title,
+        id: activeChat.id,
+        created: activeChat.created,
+        exportedAt: new Date().toISOString(),
+        model: selectedModel,
+        messageCount: activeChat.messages.length,
+        messages: activeChat.messages.map(m => ({
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp,
+          sourceType: m.sourceType || undefined,
+          sources: m.sources || undefined,
+          usage: m.usage || undefined
+        }))
+      };
+      content = JSON.stringify(exportData, null, 2);
+    } else {
+      mimeType = "text/markdown;charset=utf-8";
+      const mdLines = [
+        `# ${activeChat.title}`,
+        `**Session ID**: \`${activeChat.id}\`  `,
+        `**Created**: ${activeChat.created}  `,
+        `**Model**: \`${selectedModel}\`  `,
+        `**Exported**: ${new Date().toLocaleString()}  `,
+        `\n---\n`
+      ];
+
+      activeChat.messages.forEach((msg, idx) => {
+        const sender = msg.role === "user" ? "🧑‍💻 User" : "🤖 Nexa Assistant";
+        mdLines.push(`### ${idx + 1}. ${sender} *(${msg.timestamp})*\n`);
+        mdLines.push(msg.content);
+        if (msg.sourceType) {
+          mdLines.push(`\n*Source: ${msg.sourceType}*`);
+        }
+        mdLines.push(`\n---\n`);
+      });
+
+      content = mdLines.join("\n");
+    }
+
+    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `chat-export-${activeChat.id}-${Date.now()}.txt`;
+    link.download = `nexa-chat-${activeChat.id}-${Date.now()}.${extension}`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -589,6 +638,8 @@ What are we coding today?`,
       ? textToSend.substring(0, 32) + (textToSend.length > 32 ? "..." : "")
       : targetChat.title;
 
+    const isFirstUserMessage = targetChat.messages.filter(m => m.role === "user").length === 0;
+
     const updatedMessages = [...targetChat.messages, userMsg];
 
     // Optimistic UI updates
@@ -610,6 +661,41 @@ What are we coding today?`,
     setInputValue("");
     setIsSending(true);
     setChatError(null);
+
+    // Asynchronously generate concise auto-title for the session if this is the first message
+    if (isFirstUserMessage) {
+      fetch("/api/chat/title", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "x-goog-api-key": userApiKey,
+          "x-gemini-api-key": userApiKey
+        },
+        body: JSON.stringify({ 
+          message: textToSend,
+          apiKey: userApiKey
+        })
+      })
+      .then(res => res.json())
+      .then(titleData => {
+        if (titleData.title && typeof titleData.title === "string") {
+          const generatedTitle = titleData.title.trim();
+          if (generatedTitle) {
+            setChats(prev => prev.map(c => {
+              if (c.id === currentChatId) {
+                const updatedSession = { ...c, title: generatedTitle };
+                saveChatToSupabase(updatedSession);
+                return updatedSession;
+              }
+              return c;
+            }));
+          }
+        }
+      })
+      .catch(err => {
+        console.warn("Auto-title generation failed silently, keeping fallback title:", err);
+      });
+    }
 
     try {
       const response = await fetch("/api/chat", {
@@ -647,29 +733,37 @@ What are we coding today?`,
         throw new Error(data.error || `Failed to receive response from assistant (Status ${response.status})`);
       }
 
+      // Update session token counter state if returned
+      if (data.usage && data.usage.totalTokens > 0) {
+        setSessionTokenUsage({
+          promptTokens: data.usage.promptTokens || 0,
+          candidatesTokens: data.usage.candidatesTokens || 0,
+          totalTokens: data.usage.totalTokens || 0
+        });
+      }
+
       const assistantMsg: Message = {
         id: generateUniqueId("msg-assistant"),
         role: "assistant",
         content: data.content,
         timestamp: getFormattedTime(),
         sources: data.sources,
-        sourceType: data.sourceType
-      };
-
-      const finalSuccessChat: ChatSession = {
-        ...targetChat,
-        title: newTitle,
-        messages: [...updatedMessages, assistantMsg]
+        sourceType: data.sourceType,
+        usage: data.usage
       };
 
       setChats(prev => prev.map(c => {
         if (c.id === currentChatId) {
+          const finalSuccessChat: ChatSession = {
+            ...c,
+            messages: [...c.messages.filter(m => m.id !== assistantMsg.id), assistantMsg],
+            lastUsage: data.usage
+          };
+          saveChatToSupabase(finalSuccessChat);
           return finalSuccessChat;
         }
         return c;
       }));
-
-      saveChatToSupabase(finalSuccessChat);
     } catch (err: any) {
       console.error(err);
       const errMessage = err.message || "An unexpected error occurred.";
@@ -1255,17 +1349,46 @@ What are we coding today?`,
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Export Chat Button */}
+            {/* Export Chat Dropdown Menu */}
             {activeTab === "chat" && activeChat && activeChat.messages.length > 0 && (
-              <button
-                id="export-chat-button"
-                onClick={handleExportChat}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 transition-colors shadow-xs"
-                title="Export Chat Session to Text File"
-              >
-                <Download className="h-3.5 w-3.5 text-amber-800 dark:text-amber-400" />
-                <span className="text-xs font-semibold font-mono hidden md:inline">Export</span>
-              </button>
+              <div className="relative">
+                <button
+                  id="export-chat-button"
+                  onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 transition-colors shadow-xs cursor-pointer"
+                  title="Export Chat Session"
+                >
+                  <Download className="h-3.5 w-3.5 text-amber-800 dark:text-amber-400" />
+                  <span className="text-xs font-semibold font-mono hidden md:inline">Export</span>
+                  <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
+                </button>
+
+                <AnimatePresence>
+                  {isExportDropdownOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 5 }}
+                      className="absolute right-0 mt-1.5 w-36 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-xl p-1 z-30 font-mono text-xs"
+                    >
+                      <button
+                        id="export-chat-json-btn"
+                        onClick={() => handleExportChat("json")}
+                        className="w-full text-left flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-200 transition-colors cursor-pointer"
+                      >
+                        <span>JSON (.json)</span>
+                      </button>
+                      <button
+                        id="export-chat-md-btn"
+                        onClick={() => handleExportChat("md")}
+                        className="w-full text-left flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-200 transition-colors cursor-pointer"
+                      >
+                        <span>Markdown (.md)</span>
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             )}
 
             {/* Live indicator or status bubble */}
@@ -1608,19 +1731,60 @@ What are we coding today?`,
                       </button>
                     </div>
 
-                    <button
-                      id="submit-message-button"
-                      disabled={!inputValue.trim() || isSending}
-                      onClick={() => handleSendMessage()}
-                      className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200 ${
-                        inputValue.trim() && !isSending
-                          ? "bg-amber-900 dark:bg-amber-100 text-white dark:text-neutral-950 hover:scale-[1.05]"
-                          : "bg-neutral-200 dark:bg-neutral-800 text-neutral-400 cursor-not-allowed"
-                      }`}
-                      title="Send message"
-                    >
-                      <ArrowUp className="h-4 w-4 stroke-[2.5px]" />
-                    </button>
+                    <div className="flex items-center gap-3">
+                      {/* Live Token Usage Counter Badge */}
+                      {(() => {
+                        const estimatedInputTokens = inputValue.trim() ? Math.ceil(inputValue.trim().length / 3.8) : 0;
+                        const currentSessionTokens = activeChat?.lastUsage?.totalTokens || sessionTokenUsage?.totalTokens || 0;
+                        
+                        return (
+                          <div 
+                            id="token-usage-badge"
+                            className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md bg-neutral-200/50 dark:bg-neutral-800/50 text-[10px] font-mono text-neutral-500 dark:text-neutral-400 border border-neutral-200/60 dark:border-neutral-800/60"
+                            title={
+                              currentSessionTokens > 0 
+                                ? `Last Response: ${currentSessionTokens.toLocaleString()} tokens | Est. Input: ~${estimatedInputTokens} tokens`
+                                : `Real-time token estimation based on prompt character length (~${estimatedInputTokens} tokens)`
+                            }
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500/80 shrink-0"></span>
+                            <span>
+                              {currentSessionTokens > 0 ? (
+                                <>
+                                  <span className="font-semibold text-neutral-700 dark:text-neutral-300">{currentSessionTokens.toLocaleString()}</span>
+                                  <span className="opacity-70"> tok</span>
+                                  {estimatedInputTokens > 0 && (
+                                    <span className="text-amber-600 dark:text-amber-400 ml-1">
+                                      (+~{estimatedInputTokens})
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <span className="opacity-75">Est: </span>
+                                  <span className="font-semibold text-neutral-700 dark:text-neutral-300">~{estimatedInputTokens}</span>
+                                  <span className="opacity-70"> tok</span>
+                                </>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })()}
+
+                      <button
+                        id="submit-message-button"
+                        disabled={!inputValue.trim() || isSending}
+                        onClick={() => handleSendMessage()}
+                        className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200 cursor-pointer ${
+                          inputValue.trim() && !isSending
+                            ? "bg-amber-900 dark:bg-amber-100 text-white dark:text-neutral-950 hover:scale-[1.05]"
+                            : "bg-neutral-200 dark:bg-neutral-800 text-neutral-400 cursor-not-allowed"
+                        }`}
+                        title="Send message"
+                      >
+                        <ArrowUp className="h-4 w-4 stroke-[2.5px]" />
+                      </button>
+                    </div>
                   </div>
                 </div>
 

@@ -294,16 +294,34 @@ CORE CONVERSATIONAL GUIDELINES:
     }
 
     let text = "I apologize, but I could not generate a response.";
+    let usage = {
+      promptTokens: 0,
+      candidatesTokens: 0,
+      totalTokens: 0
+    };
+
     try {
       if (response.text) {
         text = response.text;
       } else if (response.candidates?.[0]?.content?.parts?.[0]?.text) {
         text = response.candidates[0].content.parts[0].text;
       }
+      if (response.usageMetadata) {
+        usage = {
+          promptTokens: response.usageMetadata.promptTokenCount || 0,
+          candidatesTokens: response.usageMetadata.candidatesTokenCount || 0,
+          totalTokens: response.usageMetadata.totalTokenCount || 0
+        };
+      }
     } catch (e) {
       // ignore
     }
-    return NextResponse.json({ content: text, sources: retrievedSources, sourceType: sourceType });
+    return NextResponse.json({ 
+      content: text, 
+      sources: retrievedSources, 
+      sourceType: sourceType,
+      usage
+    });
   } catch (error: any) {
     if (error.name === 'AbortError') {
       return NextResponse.json({ error: "⏱️ Request timed out. The operation took longer than 20 seconds." }, { status: 504 });

@@ -14,7 +14,9 @@ import {
   Layers,
   Database,
   ExternalLink,
-  MessageSquare
+  MessageSquare,
+  Search,
+  X
 } from "lucide-react";
 
 interface Project {
@@ -36,6 +38,7 @@ export default function AgentDashboard() {
   const [editName, setEditName] = useState("");
   const [usingSupabase, setUsingSupabase] = useState(false);
   const [sqlSchema, setSqlSchema] = useState<string | null>(null);
+  const [projectSearchQuery, setProjectSearchQuery] = useState("");
 
   // Load projects from either Supabase or LocalStorage
   useEffect(() => {
@@ -204,6 +207,16 @@ export default function AgentDashboard() {
     }
   };
 
+  // Real-time client-side filter by project name or creation/update date
+  const filteredProjects = projects.filter((proj) => {
+    if (!projectSearchQuery.trim()) return true;
+    const query = projectSearchQuery.toLowerCase().trim();
+    const nameMatch = proj.name.toLowerCase().includes(query);
+    const dateFormatted = new Date(proj.createdAt || proj.updatedAt).toLocaleDateString().toLowerCase();
+    const dateRaw = String(proj.createdAt || proj.updatedAt).toLowerCase();
+    return nameMatch || dateFormatted.includes(query) || dateRaw.includes(query);
+  });
+
   return (
     <div className="min-h-screen bg-[#0E1117] text-[#E6EDF3] flex flex-col font-sans">
       {/* Top Navigation / Play Nexa Branded Header */}
@@ -322,26 +335,55 @@ export default function AgentDashboard() {
 
         {/* Projects History Section */}
         <div className="w-full max-w-2xl">
-          <div className="flex items-center justify-between border-b border-neutral-800/60 pb-3 mb-4">
-            <h3 className="text-sm font-semibold tracking-wide text-neutral-400 uppercase font-mono">
-              Workspace History
-            </h3>
-            <span className="text-xs text-neutral-500 font-mono">
-              {projects.length} Workspace Projects
-            </span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-800/60 pb-3 mb-4">
+            <div className="flex items-center space-x-3">
+              <h3 className="text-sm font-semibold tracking-wide text-neutral-400 uppercase font-mono">
+                Workspace History
+              </h3>
+              <span className="text-xs text-neutral-500 font-mono">
+                {filteredProjects.length} / {projects.length} Workspaces
+              </span>
+            </div>
+
+            {/* Real-time Search Input Field */}
+            <div className="relative flex items-center min-w-[220px]">
+              <Search className="w-3.5 h-3.5 text-neutral-500 absolute left-3 pointer-events-none" />
+              <input
+                id="search-agent-projects-input"
+                type="text"
+                value={projectSearchQuery}
+                onChange={(e) => setProjectSearchQuery(e.target.value)}
+                placeholder="Search projects or dates..."
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-8 pr-7 py-1.5 text-xs text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-amber-600/60 font-sans transition-colors"
+              />
+              {projectSearchQuery && (
+                <button
+                  id="clear-agent-project-search-btn"
+                  onClick={() => setProjectSearchQuery("")}
+                  className="absolute right-2.5 p-0.5 rounded-full hover:bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
+                  title="Clear Search"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           </div>
 
           {loading ? (
             <div className="text-center py-12 text-sm text-neutral-500">
               Loading workspaces...
             </div>
-          ) : projects.length === 0 ? (
+          ) : filteredProjects.length === 0 ? (
             <div className="border border-dashed border-neutral-800/80 rounded-xl py-12 px-4 text-center text-sm text-neutral-500">
-              No previous workspaces found. Create your first project above.
+              {projectSearchQuery ? (
+                <span>No workspaces matching &ldquo;{projectSearchQuery}&rdquo;. Try another search term.</span>
+              ) : (
+                <span>No previous workspaces found. Create your first project above.</span>
+              )}
             </div>
           ) : (
             <div className="space-y-2.5">
-              {projects.map((proj) => (
+              {filteredProjects.map((proj) => (
                 <div 
                   key={proj.id}
                   className="bg-[#0B0D13] border border-neutral-800 hover:border-neutral-700 rounded-xl p-4 flex items-center justify-between transition-all group"

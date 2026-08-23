@@ -23,7 +23,9 @@ import {
   File,
   Loader2,
   Folder,
-  Key
+  Key,
+  Download,
+  ChevronDown
 } from "lucide-react";
 
 interface LogItem {
@@ -57,6 +59,62 @@ export default function WorkspacePage() {
   const [isSaving, setIsSaving] = useState(false);
   const [byokApiKey, setByokApiKey] = useState("");
   const [byokSavedFeedback, setByokSavedFeedback] = useState(false);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+
+  // Export Agent Chat history to JSON or Markdown
+  const handleExportAgentChat = (format: "json" | "md") => {
+    setIsExportMenuOpen(false);
+    if (!messages || messages.length === 0) return;
+
+    let content = "";
+    let mimeType = "text/plain;charset=utf-8";
+    let extension = format;
+
+    if (format === "json") {
+      mimeType = "application/json;charset=utf-8";
+      const exportData = {
+        project: projectName,
+        projectId,
+        exportedAt: new Date().toISOString(),
+        model: selectedModel,
+        messageCount: messages.length,
+        messages: messages.map(m => ({
+          role: m.role,
+          content: m.content
+        }))
+      };
+      content = JSON.stringify(exportData, null, 2);
+    } else {
+      mimeType = "text/markdown;charset=utf-8";
+      const mdLines = [
+        `# Nexa Agent Session Export: ${projectName}`,
+        `**Project ID**: \`${projectId}\`  `,
+        `**Date**: ${new Date().toLocaleString()}  `,
+        `**Model**: \`${selectedModel}\`  `,
+        `**Messages**: ${messages.length}`,
+        `\n---\n`
+      ];
+
+      messages.forEach((msg, idx) => {
+        const sender = msg.role === "user" ? "🧑‍💻 User" : "🤖 Nexa Agent";
+        mdLines.push(`### ${idx + 1}. ${sender}\n`);
+        mdLines.push(msg.content);
+        mdLines.push(`\n---\n`);
+      });
+
+      content = mdLines.join("\n");
+    }
+
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `nexa-agent-${projectId}-${Date.now()}.${extension}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
   
   // App-wide flags
   const [loading, setLoading] = useState(true);
@@ -654,7 +712,52 @@ export default function WorkspacePage() {
                     Nexa Agent Chat
                   </span>
                 </div>
-                {agentRunning && <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" />}
+                
+                <div className="flex items-center space-x-2">
+                  {agentRunning && <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" />}
+
+                  {/* Export Chat Dropdown */}
+                  {messages.length > 0 && (
+                    <div className="relative">
+                      <button
+                        id="export-agent-chat-btn"
+                        onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                        className="flex items-center space-x-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-2 py-1 rounded-md text-[11px] font-mono transition-colors cursor-pointer"
+                        title="Export Agent Chat"
+                      >
+                        <Download className="w-3 h-3 text-amber-500" />
+                        <span className="hidden sm:inline">Export</span>
+                        <ChevronDown className="w-2.5 h-2.5 opacity-60" />
+                      </button>
+
+                      <AnimatePresence>
+                        {isExportMenuOpen && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 5 }}
+                            className="absolute right-0 mt-1 w-32 bg-[#0E1117] border border-neutral-800 rounded-lg shadow-xl p-1 z-30 font-mono text-[11px]"
+                          >
+                            <button
+                              id="export-agent-json-btn"
+                              onClick={() => handleExportAgentChat("json")}
+                              className="w-full text-left flex items-center justify-between px-2.5 py-1.5 rounded hover:bg-neutral-900 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                            >
+                              <span>JSON (.json)</span>
+                            </button>
+                            <button
+                              id="export-agent-md-btn"
+                              onClick={() => handleExportAgentChat("md")}
+                              className="w-full text-left flex items-center justify-between px-2.5 py-1.5 rounded hover:bg-neutral-900 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                            >
+                              <span>Markdown (.md)</span>
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Chat messages */}
@@ -1007,10 +1110,44 @@ export default function WorkspacePage() {
               {/* Mobile Tab 2: Prompt (Agent Chat) */}
               {activeMobileTab === "prompt" && (
                 <div className="absolute inset-0 flex flex-col overflow-hidden bg-[#0E1117]">
-                  <div className="p-3 border-b border-neutral-800 bg-[#0B0D13]">
+                  <div className="p-3 border-b border-neutral-800 bg-[#0B0D13] flex items-center justify-between">
                     <span className="text-xs font-mono uppercase tracking-wider text-neutral-400">
                       Nexa Autonomous Agent
                     </span>
+                    {messages.length > 0 && (
+                      <div className="relative">
+                        <button
+                          onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                          className="flex items-center space-x-1 bg-neutral-900 border border-neutral-800 text-neutral-300 px-2 py-0.5 rounded text-[10px] font-mono cursor-pointer"
+                        >
+                          <Download className="w-3 h-3 text-amber-500" />
+                          <span>Export</span>
+                        </button>
+                        <AnimatePresence>
+                          {isExportMenuOpen && (
+                            <motion.div
+                              initial={{ opacity: 0, y: 5 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: 5 }}
+                              className="absolute right-0 mt-1 w-32 bg-[#0E1117] border border-neutral-800 rounded-lg shadow-xl p-1 z-30 font-mono text-[10px]"
+                            >
+                              <button
+                                onClick={() => handleExportAgentChat("json")}
+                                className="w-full text-left px-2 py-1 rounded hover:bg-neutral-900 text-neutral-300"
+                              >
+                                JSON (.json)
+                              </button>
+                              <button
+                                onClick={() => handleExportAgentChat("md")}
+                                className="w-full text-left px-2 py-1 rounded hover:bg-neutral-900 text-neutral-300"
+                              >
+                                Markdown (.md)
+                              </button>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-4 space-y-4">
