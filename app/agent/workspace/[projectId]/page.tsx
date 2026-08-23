@@ -120,7 +120,7 @@ export default function WorkspacePage() {
   const [loading, setLoading] = useState(true);
   const [usingSupabase, setUsingSupabase] = useState(false);
   const [isSecretsOpen, setIsSecretsOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState("gemini-3.7-flash");
+  const [selectedModel, setSelectedModel] = useState("gemini-2.0-flash");
 
   // Dual layout mode
   const [isDesktopMode, setIsDesktopMode] = useState(true);
@@ -698,10 +698,8 @@ export default function WorkspacePage() {
               onChange={(e) => setSelectedModel(e.target.value)}
               className="bg-transparent text-[11px] font-mono text-neutral-300 focus:outline-none cursor-pointer pr-1"
             >
-              <option value="gemini-3.7-flash">gemini-3.7-flash</option>
-              <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
-              <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
               <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+              <option value="gemini-2.0-flash-lite-preview-02-05">gemini-2.0-flash-lite</option>
               <option value="gemini-1.5-pro">gemini-1.5-pro</option>
               <option value="gemini-1.5-flash">gemini-1.5-flash</option>
             </select>

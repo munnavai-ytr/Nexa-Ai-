@@ -221,16 +221,15 @@ export async function POST(req: NextRequest) {
       };
     });
 
-    const requestedModel = typeof model === "string" && model.trim().length > 0 ? model.trim() : "gemini-3.7-flash";
+    const requestedModel = typeof model === "string" && model.trim().length > 0 ? model.trim() : "gemini-2.0-flash";
     const sanitizedModel = sanitizeModelName(requestedModel);
     
     const modelsToTry = [
       sanitizedModel,
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
+      "gemini-2.0-flash",
       "gemini-1.5-flash",
       "gemini-1.5-flash-8b",
-      "gemini-3.1-pro-preview",
+      "gemini-2.0-flash-lite-preview-02-05",
       "gemini-1.5-pro",
       STABLE_FALLBACK_MODEL
     ].filter((m, i, arr) => m && arr.indexOf(m) === i);

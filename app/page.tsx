@@ -119,7 +119,7 @@ export default function Home() {
   const [userGeminiApiKey, setUserGeminiApiKey] = useState("");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [showApiKeyInSettings, setShowApiKeyInSettings] = useState(false);
-  const [selectedModel, setSelectedModel] = useState("gemini-3.7-flash");
+  const [selectedModel, setSelectedModel] = useState("gemini-2.0-flash");
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [codeViewModes, setCodeViewModes] = useState<Record<string, "code" | "diff">>({});
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
@@ -2658,10 +2658,8 @@ What are we coding today?`,
                     onChange={(e) => setSelectedModel(e.target.value)}
                     className="w-full rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 px-3.5 py-2.5 text-xs font-semibold text-neutral-800 dark:text-neutral-200 focus:outline-hidden focus:ring-2 focus:ring-amber-900/20"
                   >
-                    <option value="gemini-3.7-flash">gemini-3.7-flash</option>
-                    <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
-                    <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
                     <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                    <option value="gemini-2.0-flash-lite-preview-02-05">gemini-2.0-flash-lite</option>
                     <option value="gemini-1.5-pro">gemini-1.5-pro</option>
                     <option value="gemini-1.5-flash">gemini-1.5-flash</option>
                   </select>
