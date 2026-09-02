@@ -113,13 +113,15 @@ export async function POST(req: NextRequest) {
     let retrievedSources: { filename: string; score: number; snippet: string }[] = [];
     let sourceType = "Nexa Brain";
 
-    // 1. Smart Intent Routing (Speed Optimization)
-    const words = lastUserMessage.trim().split(/\s+/);
-    const isGreeting = /^(hi|hello|hey|greetings|yo|morning|afternoon|evening)(\s+.*)?$/i.test(lastUserMessage.trim());
-    const isSimpleConversational = words.length <= 5 && !/(code|error|bug|fix|implement|how to|function|class|api|database|react|nextjs)/i.test(lastUserMessage);
+    // 1. Smart Low-Latency Routing (< 800ms Time-To-First-Token)
+    // For short messages or standard coding/conversational prompts, bypass blocking remote RAG calls
+    const trimmedMsg = lastUserMessage.trim();
+    const words = trimmedMsg.split(/\s+/);
+    const isExplicitLibraryQuery = /(global library|knowledge base|library document|docs|stored file|reference doc)/i.test(trimmedMsg);
+    const isShortOrDirectMessage = words.length <= 30 || trimmedMsg.length <= 160;
     
-    // Bypass RAG/Search for greetings or very short conversational text
-    const shouldBypassRAG = (isGreeting || isSimpleConversational) && !isDeepResearch;
+    // Bypass remote database/Pinecone calls for fast response unless Deep Research is enabled or library explicitly requested
+    const shouldBypassRAG = !isDeepResearch && (!isExplicitLibraryQuery || isShortOrDirectMessage);
 
     if (!shouldBypassRAG) {
       let pineconeApiKey = process.env.PINECONE_API_KEY;
@@ -135,18 +137,19 @@ export async function POST(req: NextRequest) {
         pineconeIndexName = "ai-coding-knowledge";
       }
 
-      // Try Pinecone first (only if deep research is on OR not simple prompt)
-      if (pineconeApiKey && pineconeIndexName && lastUserMessage.trim()) {
+      // Try Pinecone first with tight timeout
+      if (pineconeApiKey && pineconeIndexName && trimmedMsg) {
         try {
-          const embedResponse = await ai.models.embedContent({
-            model: "gemini-embedding-2-preview",
-            contents: lastUserMessage,
-            config: { outputDimensionality: 768 },
-          });
+          const pineconePromise = (async () => {
+            const embedResponse = await ai.models.embedContent({
+              model: "gemini-embedding-2-preview",
+              contents: trimmedMsg,
+              config: { outputDimensionality: 768 },
+            });
 
-          const queryVector = embedResponse.embeddings?.[0]?.values;
+            const queryVector = embedResponse.embeddings?.[0]?.values;
+            if (!queryVector) return;
 
-          if (queryVector) {
             const pc = new Pinecone({ apiKey: pineconeApiKey });
             const index = pc.index(pineconeIndexName);
             const queryResponse = await index.query({
@@ -174,32 +177,46 @@ export async function POST(req: NextRequest) {
                 sourceType = isDeepResearch ? "Deep Research" : "Global Library";
               }
             }
-          }
+          })();
+
+          // Strict 350ms race to ensure low latency
+          await Promise.race([
+            pineconePromise,
+            new Promise((resolve) => setTimeout(resolve, 350))
+          ]);
         } catch (pineconeErr: any) {
-          console.warn("[RAG] Pinecone query failed:", pineconeErr.message || pineconeErr);
+          console.warn("[RAG] Pinecone query skipped or failed:", pineconeErr.message || pineconeErr);
         }
       }
 
-      // 2. Fetch from Supabase Global Library Knowledge Base
-      if (retrievedSources.length === 0 && lastUserMessage.trim() && !isDeepResearch) {
+      // 2. Fetch from Supabase Global Library Knowledge Base with fast timeout
+      if (retrievedSources.length === 0 && trimmedMsg) {
         let globalDocs: { filename: string; content: string; title?: string }[] = [];
         const supabase = getSupabase();
 
         if (supabase) {
           try {
-            const { data, error } = await supabase
-              .from("global_library")
-              .select("*");
+            const supabasePromise = (async () => {
+              const { data, error } = await supabase
+                .from("global_library")
+                .select("file_name, title, content")
+                .limit(10);
 
-            if (!error && data && data.length > 0) {
-              globalDocs = data.map((row: any) => ({
-                filename: row.file_name || row.title || "document.txt",
-                title: row.title || row.file_name || "Document",
-                content: row.content || ""
-              }));
-            }
+              if (!error && data && data.length > 0) {
+                globalDocs = data.map((row: any) => ({
+                  filename: row.file_name || row.title || "document.txt",
+                  title: row.title || row.file_name || "Document",
+                  content: row.content || ""
+                }));
+              }
+            })();
+
+            await Promise.race([
+              supabasePromise,
+              new Promise((resolve) => setTimeout(resolve, 300))
+            ]);
           } catch (supabaseErr) {
-            console.warn("[RAG] Supabase fetch error, fallback to local store:", supabaseErr);
+            console.warn("[RAG] Supabase fetch fallback to local store:", supabaseErr);
           }
         }
 
@@ -432,19 +449,26 @@ You are not limited to this style. Be creative, create multi-screen workflows, s
       
       while (attempts < maxAttempts) {
         try {
+          // Latency optimization: Eliminate thinking budget delay when thinking is disabled
+          const streamConfig: any = {
+            systemInstruction,
+            temperature: 0.7,
+            safetySettings: [
+              { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+              { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+              { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+              { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+            ]
+          };
+
+          if (!isThinking) {
+            streamConfig.thinkingConfig = { thinkingBudget: 0 };
+          }
+
           responseStream = await ai.models.generateContentStream({
             model: modelName,
             contents: contents,
-            config: {
-              systemInstruction,
-              temperature: 0.7,
-              safetySettings: [
-                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
-              ]
-            },
+            config: streamConfig,
           });
           if (responseStream) break;
         } catch (err: any) {
@@ -478,7 +502,8 @@ You are not limited to this style. Be creative, create multi-screen workflows, s
         try {
           for await (const chunk of responseStream) {
             if (chunk.text) {
-              controller.enqueue(encoder.encode(JSON.stringify({ text: chunk.text }) + "\n"));
+              // Server-Sent Events (SSE) standard chunk
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: chunk.text })}\n\n`));
             }
             if (chunk.usageMetadata) {
               usage = {
@@ -488,15 +513,15 @@ You are not limited to this style. Be creative, create multi-screen workflows, s
               };
             }
           }
-          controller.enqueue(encoder.encode(JSON.stringify({ 
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
             done: true, 
             sources: retrievedSources, 
             sourceType: sourceType,
             usage
-          }) + "\n"));
+          })}\n\n`));
           controller.close();
         } catch (e: any) {
-           controller.enqueue(encoder.encode(JSON.stringify({ error: e.message || "Streaming error" }) + "\n"));
+           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: e.message || "Streaming error" })}\n\n`));
            controller.close();
         }
       }
@@ -504,8 +529,10 @@ You are not limited to this style. Be creative, create multi-screen workflows, s
 
     return new Response(stream, { 
       headers: { 
-        'Content-Type': 'application/x-ndjson',
-        'Cache-Control': 'no-cache, no-transform'
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform, no-store',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
       } 
     });
   } catch (error: any) {

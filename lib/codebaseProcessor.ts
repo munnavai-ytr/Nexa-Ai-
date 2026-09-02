@@ -176,13 +176,81 @@ export function isSupportedCodeFile(relativePath: string): boolean {
 }
 
 /**
- * Optimized JSZip client-side codebase extractor for 700+ files.
- * Uses lightweight TextDecoder and ignores vendor/binary junk without artificial file count limits.
+ * Optimized client-side codebase extractor for 700+ files.
+ * Offloads all JSZip parsing, decoding, and extraction to a dedicated Web Worker,
+ * keeping the main UI thread at a smooth 60 FPS without layout or input freezes.
  */
 export async function processZipFile(
   file: File,
   onProgress?: (msg: string, stats?: ZipProgressStats) => void
 ): Promise<ExtractedCodebase> {
+  onProgress?.("Offloading ZIP archive to background Web Worker...");
+
+  // 1. Check for Web Worker availability
+  if (typeof window !== "undefined" && typeof Worker !== "undefined") {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+
+      return await new Promise<ExtractedCodebase>((resolve, reject) => {
+        let worker: Worker | null = null;
+        try {
+          worker = new Worker("/zipWorker.js");
+        } catch (workerInitErr) {
+          reject(workerInitErr);
+          return;
+        }
+
+        const msgId = "zip_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7);
+
+        worker.onmessage = (e: MessageEvent) => {
+          const data = e.data;
+          if (!data || data.id !== msgId) return;
+
+          if (data.type === "PROGRESS") {
+            onProgress?.(data.message, {
+              totalFilesCount: data.totalFilesCount || 0,
+              validFilesCount: data.validFilesCount || 0
+            });
+          } else if (data.type === "SUCCESS") {
+            if (worker) {
+              worker.terminate();
+              worker = null;
+            }
+            resolve(data.result);
+          } else if (data.type === "ERROR") {
+            if (worker) {
+              worker.terminate();
+              worker = null;
+            }
+            reject(new Error(data.error || "Web Worker failed to process ZIP"));
+          }
+        };
+
+        worker.onerror = (err) => {
+          if (worker) {
+            worker.terminate();
+            worker = null;
+          }
+          reject(new Error(err.message || "Web Worker execution error"));
+        };
+
+        // Transfer arrayBuffer to worker thread for zero-copy high performance
+        worker.postMessage(
+          {
+            id: msgId,
+            type: "PROCESS_ZIP",
+            arrayBuffer,
+            fileName: file.name
+          },
+          [arrayBuffer]
+        );
+      });
+    } catch (workerErr) {
+      console.warn("Web Worker processing failed, falling back to main-thread async fallback:", workerErr);
+    }
+  }
+
+  // 2. Main-thread asynchronous fallback (if Worker is unavailable or fails)
   onProgress?.("Unpacking ZIP archive in memory...");
   const arrayBuffer = await file.arrayBuffer();
 
@@ -192,9 +260,8 @@ export async function processZipFile(
   const validFiles: ExtractedCodeFile[] = [];
   let totalFilesCount = 0;
 
-  // Lightweight reusable text decoder for minimal memory footprint
   const textDecoder = new TextDecoder("utf-8", { fatal: false });
-  const MAX_SINGLE_FILE_BYTES = 1024 * 1024; // 1 MB limit per individual code file to avoid memory crashes
+  const MAX_SINGLE_FILE_BYTES = 1024 * 1024; // 1 MB limit
 
   for (const relativePath of entries) {
     const zipEntry = zip.files[relativePath];
@@ -202,24 +269,16 @@ export async function processZipFile(
 
     totalFilesCount++;
 
-    // 1. Smart File Filtering: Skip ignored folders
-    if (isIgnoredDirectory(relativePath)) {
-      continue;
-    }
-
-    // 2. Supported Code Extensions: Skip binaries & non-source files
-    if (!isSupportedCodeFile(relativePath)) {
+    if (isIgnoredDirectory(relativePath) || !isSupportedCodeFile(relativePath)) {
       continue;
     }
 
     try {
-      // Check pre-decompressed size if available to prevent decoding massive files
       const uncompressedSize = (zipEntry as any)._data?.uncompressedSize;
       if (typeof uncompressedSize === "number" && uncompressedSize > MAX_SINGLE_FILE_BYTES) {
         continue;
       }
 
-      // Extract raw Uint8Array and decode using lightweight TextDecoder
       const uint8 = await zipEntry.async("uint8array");
       if (!uint8 || uint8.byteLength === 0 || uint8.byteLength > MAX_SINGLE_FILE_BYTES) {
         continue;
@@ -241,11 +300,9 @@ export async function processZipFile(
         language: lang
       });
     } catch {
-      // Gracefully continue on corrupt or undecodable entries
       continue;
     }
 
-    // Yield to browser event loop every 20 files to keep UI responsive and report progress
     if (totalFilesCount % 20 === 0) {
       onProgress?.(
         `📦 Analyzed ${totalFilesCount} files (Extracted ${validFiles.length} core code files)...`,
@@ -255,13 +312,11 @@ export async function processZipFile(
     }
   }
 
-  // 3. Final Status & Counter Feedback
   onProgress?.(
     `📦 Analyzed ${totalFilesCount} files (Extracted ${validFiles.length} core code files)...`,
     { totalFilesCount, validFilesCount: validFiles.length }
   );
 
-  // 4. Payload Construction: Concatenate cleanly with file headers: // File: path/to/file.tsx \n [code content] \n\n
   let formattedContext = "";
   for (const f of validFiles) {
     formattedContext += `// File: ${f.path}\n${f.content}\n\n`;

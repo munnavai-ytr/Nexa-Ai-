@@ -41,6 +41,8 @@ import {
   Layers,
   FileCheck,
   Smartphone,
+  SlidersHorizontal,
+  Code,
   Image as ImageIcon
 } from "lucide-react";
 import Link from "next/link";
@@ -172,6 +174,7 @@ export default function Home() {
   // BYOK (Bring Your Own Key) States
   const [userGeminiApiKey, setUserGeminiApiKey] = useState("");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isMobileSettingsFabOpen, setIsMobileSettingsFabOpen] = useState(false);
   const [showApiKeyInSettings, setShowApiKeyInSettings] = useState(false);
   const [selectedModel, setSelectedModel] = useState("gemini-3.5-flash");
   const [chatSearchQuery, setChatSearchQuery] = useState("");
@@ -359,34 +362,24 @@ export default function Home() {
       setZipExtractionProgress("Preparing file...");
       
       if (file.name.toLowerCase().endsWith(".zip")) {
-        setAiActionStatus("📦 Extracting ZIP file...");
-        const extracted = await processZipFile(file, (msg, stats) => {
-          setZipExtractionProgress(msg);
-          if (stats) {
-            const totalFilesCount = stats.totalFilesCount;
-            const validFiles = { length: stats.validFilesCount };
-            setAiActionStatus(`📦 Analyzed ${totalFilesCount} files (Extracted ${validFiles.length} core code files)...`);
-          } else {
-            setAiActionStatus(msg);
-          }
+        setAiActionStatus("📦 Processing ZIP file...");
+        const extracted = await processZipFile(file, (totalCount) => {
+          setZipExtractionProgress(`Processed ${totalCount} files`);
+          setAiActionStatus(`📦 Processed ${totalCount} files...`);
         });
         setAttachedZip(extracted);
-        const totalFilesCount = extracted.totalScanned;
-        const validFiles = extracted.files;
-        setAiActionStatus(`📦 Analyzed ${totalFilesCount} files (Extracted ${validFiles.length} core code files)...`);
+        setAiActionStatus(`📦 Processed ${extracted.totalFiles} files...`);
         setTimeout(() => {
           setAiActionStatus(null);
-        }, 4500);
+        }, 4000);
         if (extracted.files.length > 0) {
           setSelectedModalFile(extracted.files[0]);
         }
       } else {
-        setAiActionStatus("📂 Reading codebase...");
+        setAiActionStatus("📂 Reading file...");
         const single = await processSingleFile(file);
         setAttachedZip(single);
-        const totalFilesCount = 1;
-        const validFiles = single.files;
-        setAiActionStatus(`📦 Analyzed ${totalFilesCount} files (Extracted ${validFiles.length} core code files)...`);
+        setAiActionStatus(`📦 Processed ${single.totalFiles} files...`);
         setTimeout(() => {
           setAiActionStatus(null);
         }, 3000);
@@ -1143,25 +1136,35 @@ What are we coding today?`,
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
         
-        for (const line of lines) {
-           if (line.trim()) {
-              try {
-                const data = JSON.parse(line);
-                if (data.error) throw new Error(data.error);
-                if (data.text) assistantText += data.text;
-                if (data.done) {
-                   finalUsage = data.usage;
-                   finalSources = data.sources;
-                   finalSourceType = data.sourceType;
-                }
-              } catch (parseErr) {
-                if (parseErr instanceof Error && parseErr.message !== "Unexpected end of JSON input") {
-                   throw parseErr;
-                }
-              }
+        for (const rawLine of lines) {
+           let line = rawLine.trim();
+           if (!line) continue;
+           // Support standard Server-Sent Events (SSE) data: prefix
+           if (line.startsWith("data:")) {
+             line = line.slice(5).trim();
+           }
+           if (!line) continue;
+
+           try {
+             const data = JSON.parse(line);
+             if (data.error) throw new Error(data.error);
+             if (data.text) {
+               assistantText += data.text;
+               setAiActionStatus("Generating response");
+             }
+             if (data.done) {
+                finalUsage = data.usage;
+                finalSources = data.sources;
+                finalSourceType = data.sourceType;
+             }
+           } catch (parseErr) {
+             if (parseErr instanceof Error && parseErr.message !== "Unexpected end of JSON input") {
+                throw parseErr;
+             }
            }
         }
         
+        // Render updated stream content immediately on each chunk
         setChats(prev => prev.map(c => {
            if (c.id === currentChatId) {
               const updatedSessionMsgs = c.messages.map(m => m.id === assistantMsg.id ? { ...m, content: assistantText } : m);
@@ -1773,27 +1776,27 @@ What are we coding today?`,
       <main id="main-content-panel" className="flex flex-1 flex-col h-full overflow-hidden">
         
         {/* Top Navbar */}
-        <header className="flex h-14 items-center justify-between border-b border-neutral-200/60 dark:border-neutral-800/60 bg-[#F9F7F3] dark:bg-neutral-950 px-4 md:px-6">
-          <div className="flex items-center gap-3">
+        <header className="flex h-14 items-center justify-between border-b border-neutral-200/60 dark:border-neutral-800/60 bg-[#F9F7F3] dark:bg-neutral-950 px-3 md:px-6">
+          <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <button
               id="sidebar-hamburger-menu"
               onClick={() => setSidebarOpen(true)}
-              className="rounded-lg p-2 hover:bg-neutral-200/50 dark:hover:bg-neutral-800/50 text-neutral-600 dark:text-neutral-300 md:hidden"
+              className="rounded-lg p-2 hover:bg-neutral-200/50 dark:hover:bg-neutral-800/50 text-neutral-600 dark:text-neutral-300 md:hidden shrink-0"
             >
               <Menu className="h-5 w-5" />
             </button>
             
-            {/* View Title */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-bold tracking-tight text-zinc-900 dark:text-zinc-100 hidden sm:inline-block">
+            {/* View Title - Minimal on mobile */}
+            <div className="flex items-center gap-1.5 md:gap-2 min-w-0">
+              <span className="text-sm font-bold tracking-tight text-zinc-900 dark:text-zinc-100 hidden sm:inline-block shrink-0">
                 Play Nexa AI
               </span>
               <span className="text-neutral-300 dark:text-neutral-700 hidden sm:inline-block">/</span>
-              <span className="text-xs font-mono font-bold tracking-wider text-neutral-400 dark:text-neutral-500 uppercase">
+              <span className="text-xs font-mono font-bold tracking-wider text-neutral-400 dark:text-neutral-500 uppercase hidden sm:inline-block shrink-0">
                 {activeTab === "chat" ? "Workspace" : "Developer Tools"}
               </span>
-              <span className="text-neutral-300 dark:text-neutral-700">/</span>
-              <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300 truncate max-w-[200px] md:max-w-[400px]">
+              <span className="text-neutral-300 dark:text-neutral-700 hidden sm:inline-block">/</span>
+              <h2 className="text-xs sm:text-sm font-semibold text-neutral-700 dark:text-neutral-300 truncate max-w-[150px] sm:max-w-[220px] md:max-w-[400px]">
                 {activeTab === "chat" 
                   ? (activeChat ? activeChat.title : "New Conversation")
                   : "API Keys Dashboard"}
@@ -1801,14 +1804,14 @@ What are we coding today?`,
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 md:gap-3 shrink-0">
             {/* Export Chat Dropdown Menu */}
             {activeTab === "chat" && activeChat && activeChat.messages.length > 0 && (
               <div className="relative">
                 <button
                   id="export-chat-button"
                   onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 transition-colors shadow-xs cursor-pointer"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 md:px-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 transition-colors shadow-xs cursor-pointer"
                   title="Export Chat Session"
                 >
                   <Download className="h-3.5 w-3.5 text-amber-800 dark:text-amber-400" />
@@ -1844,8 +1847,8 @@ What are we coding today?`,
               </div>
             )}
 
-            {/* Live indicator or status bubble */}
-            <div className="hidden sm:flex items-center gap-2 rounded-full border border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/50 px-3 py-1 text-xs">
+            {/* Desktop Live indicator or status bubble */}
+            <div className="hidden md:flex items-center gap-2 rounded-full border border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/50 px-3 py-1 text-xs">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -1853,36 +1856,36 @@ What are we coding today?`,
               <span className="text-neutral-500 dark:text-neutral-400 font-mono text-[11px]">{selectedModel}</span>
             </div>
             
-            {/* Quick action: API doc link */}
+            {/* Desktop Quick action: API doc link */}
             <a 
               id="api-docs-link"
               href="https://ai.google.dev/gemini-api/docs" 
               target="_blank" 
               rel="noreferrer"
-              className="hidden sm:flex items-center gap-1 text-xs text-neutral-400 hover:text-amber-800 dark:hover:text-amber-300 font-mono"
+              className="hidden md:flex items-center gap-1 text-xs text-neutral-400 hover:text-amber-800 dark:hover:text-amber-300 font-mono"
             >
               API Docs
               <ExternalLink className="h-3 w-3" />
             </a>
 
-            {/* Install Nexa Ai PWA App Button */}
+            {/* Desktop Install Nexa Ai PWA App Button */}
             {!isInstalled && (
               <button
                 id="header-install-pwa-btn"
                 onClick={promptInstall}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-900 dark:text-amber-300 transition-all shadow-xs cursor-pointer"
+                className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-900 dark:text-amber-300 transition-all shadow-xs cursor-pointer"
                 title="Install Nexa Ai App directly to your device"
               >
                 <Smartphone className="h-3.5 w-3.5 text-amber-500 animate-pulse" />
-                <span className="text-xs font-semibold font-mono hidden sm:inline">Install App</span>
+                <span className="text-xs font-semibold font-mono">Install App</span>
               </button>
             )}
 
-            {/* Settings button for BYOK */}
+            {/* Desktop Settings button for BYOK */}
             <button
               id="byok-settings-toggle-btn"
               onClick={() => setIsSettingsOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:text-neutral-800 dark:hover:text-neutral-100 transition-colors shadow-xs"
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:text-neutral-800 dark:hover:text-neutral-100 transition-colors shadow-xs cursor-pointer"
               title="BYOK Settings"
             >
               <Settings className="h-3.5 w-3.5" />
@@ -2480,6 +2483,18 @@ What are we coding today?`,
                       >
                         <Search className="h-3 w-3" />
                         <span>Research</span>
+                      </button>
+
+                      {/* Mobile Quick BYOK Settings Shortcut (Adjacent to Chat Controls) */}
+                      <button
+                        id="mobile-chat-controls-settings-btn"
+                        type="button"
+                        onClick={() => setIsSettingsOpen(true)}
+                        className="md:hidden flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200 hover:bg-neutral-200/50 dark:hover:bg-neutral-800/60 transition-all duration-200 cursor-pointer"
+                        title="Open BYOK Settings"
+                      >
+                        <Settings className="h-3 w-3 text-amber-800 dark:text-amber-400" />
+                        <span>Settings</span>
                       </button>
                     </div>
 
@@ -3196,6 +3211,92 @@ What are we coding today?`,
         )}
 
       </main>
+
+      {/* Mobile Floating Action Button (FAB) & Toolbar Menu at bottom-4 left-4 (< md) */}
+      <div className="fixed bottom-4 left-4 z-40 md:hidden">
+        <AnimatePresence>
+          {isMobileSettingsFabOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.95 }}
+              className="mb-2.5 w-60 rounded-2xl border border-neutral-200/80 dark:border-neutral-800/80 bg-[#FDFCFB]/95 dark:bg-neutral-900/95 backdrop-blur-md shadow-2xl p-2.5 space-y-1 font-mono text-xs"
+            >
+              <div className="px-2.5 py-1.5 border-b border-neutral-200/60 dark:border-neutral-800/60 flex items-center justify-between">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-400">Settings & Tools</span>
+                <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 dark:text-emerald-400 font-mono">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
+                  <span className="truncate max-w-[90px]">{selectedModel}</span>
+                </div>
+              </div>
+
+              <button
+                id="mobile-fab-byok-settings-btn"
+                onClick={() => {
+                  setIsSettingsOpen(true);
+                  setIsMobileSettingsFabOpen(false);
+                }}
+                className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-left cursor-pointer transition-colors"
+              >
+                <Settings className="h-4 w-4 text-amber-800 dark:text-amber-400 shrink-0" />
+                <div className="flex flex-col min-w-0">
+                  <span className="font-semibold text-xs">BYOK Settings</span>
+                  <span className="text-[10px] text-neutral-400 truncate">Manage API key & model</span>
+                </div>
+              </button>
+
+              {!isInstalled && (
+                <button
+                  id="mobile-fab-install-app-btn"
+                  onClick={() => {
+                    promptInstall();
+                    setIsMobileSettingsFabOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-amber-900 dark:text-amber-300 hover:bg-amber-500/10 text-left cursor-pointer transition-colors"
+                >
+                  <Smartphone className="h-4 w-4 text-amber-500 animate-pulse shrink-0" />
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-semibold text-xs">Install App</span>
+                    <span className="text-[10px] text-amber-600/80 dark:text-amber-400/80 truncate">Add to home screen</span>
+                  </div>
+                </button>
+              )}
+
+              <button
+                id="mobile-fab-switch-view-btn"
+                onClick={() => {
+                  setActiveTab(activeTab === "chat" ? "api-keys" : "chat");
+                  setIsMobileSettingsFabOpen(false);
+                }}
+                className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-left cursor-pointer transition-colors"
+              >
+                <Code className="h-4 w-4 text-neutral-500 shrink-0" />
+                <div className="flex flex-col min-w-0">
+                  <span className="font-semibold text-xs">
+                    {activeTab === "chat" ? "Developer Tools" : "Return to Chat"}
+                  </span>
+                  <span className="text-[10px] text-neutral-400 truncate">
+                    {activeTab === "chat" ? "Custom API keys & DB" : "Active workspace"}
+                  </span>
+                </div>
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <button
+          id="mobile-settings-fab-btn"
+          onClick={() => setIsMobileSettingsFabOpen(!isMobileSettingsFabOpen)}
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-white dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800/80 text-neutral-700 dark:text-neutral-200 shadow-xl hover:scale-105 active:scale-95 transition-all duration-200 cursor-pointer"
+          title="Mobile Settings & Tools"
+        >
+          {isMobileSettingsFabOpen ? (
+            <X className="h-5 w-5 text-neutral-600 dark:text-neutral-300" />
+          ) : (
+            <SlidersHorizontal className="h-5 w-5 text-amber-800 dark:text-amber-400" />
+          )}
+        </button>
+      </div>
 
       {/* 3. MODAL: GENERATE KEY NAME & PROMPT */}
       <AnimatePresence>
