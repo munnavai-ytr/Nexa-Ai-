@@ -1,0 +1,6 @@
+{
+  "name": "AI Coding Assistant Platform",
+  "description": "An advanced Claude-like AI coding and engineering assistant with infinite memory, zip codebase extraction, and deep problem analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
